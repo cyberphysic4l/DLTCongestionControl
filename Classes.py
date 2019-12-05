@@ -6,6 +6,15 @@ Created on Fri Sep 27 22:28:39 2019
 """
 import numpy as np
 
+def main():
+    DelayMatrix = np.array([[0,1,1],[1,0,1],[1,1,0]])
+    Network = Network(DelayMatrix)
+    
+    # some loop over time
+    NodeLambda = 10 # each Node receiving TXs to add at this rate
+    Network.process_transactions(NodeLambda, Time)
+    
+
 class Transaction:
     
     def __init__(self, ArrivalTime, Parents, No = None, Signature):
@@ -24,11 +33,11 @@ class Transaction:
 
 class Node:
     
-    def __init__(self, Network, PoW = 1):
+    def __init__(self, Network, PoWDelay = 1):
         self.TipsSet = []
         self.TempTransactions = []
         self.Tangle = []
-        self.PoW = PoW
+        self.PoWDelay = PoWDelay
         self.Users = []
         self.Network = Network
         self.Queue = []
@@ -49,9 +58,9 @@ class Node:
         return Selection
 
     def add_transactions(self, Time):
+        
         for Tran in self.TempTransactions:
-            if (Tran.ArrivalTime + self.PoW) <= Time:
-                
+            if (Tran.ArrivalTime + self.PoWDelay) <= Time:
                 Tran.No = Time + np.random.normal(0,0.01)
                 self.TempTransactions.remove(Tran)
                 self.Tangle.append(Tran)
@@ -64,8 +73,22 @@ class Node:
                         continue
                 self.Network.broadcast_transaction(self, Tran)
                 
+        for Tran in self.Queue:
+            self.Queue.remove(Tran)
+            self.Tangle.append(Tran)
+            if(Tran.is_tip()):
+                self.TipsSet.append(Tran)
+            for Parent in Tran.Parents:
+                if Parent in self.TipsSet:
+                    Parent.Children.append(Tran)
+                    self.TipsSet.remove(Child)
+                else:
+                    continue
+            self.Network.broadcast_transaction(self, Tran)
+                
     def add_to_queue(self, Tran):
-        Queue.append(Tran)
+        if (Tran not in Queue) and (Tran not in Tangle):
+            Queue.append(Tran)
         
 
 class FullNode(Node):
@@ -88,7 +111,7 @@ class User:
         else:
             self.NodesList[Node] = 1
 
-        Children = Node.assign_tips(NSelections)
+        Children = Node.select_tips(NSelections)
         Node.TempTransactions.append(Transaction(Time, Children))
         
 class Packet:
@@ -150,4 +173,11 @@ class Network:
             for CC in CCs:
                 CC.transmit_packets()
     
+    def process_transactions(self, NodeLambda, Time):
+        for Node in self.Nodes:
+            for i in range(np.random.poisson(NodeLambda)):
+                Parents = Node.select_tips()
+                Node.TempTransactions.append(Transaction(Time, Parents, Node))
+            Node.add_transactions(Time)
+            
     
