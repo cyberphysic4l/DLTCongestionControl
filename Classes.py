@@ -66,8 +66,8 @@ class Node:
                 self.Tangle.append(Tran)
                 self.TipsSet.append(Tran)
                 for Parent in Tran.Parents:
+                    Parent.Children.append(Tran)
                     if Parent in self.TipsSet:
-                        Parent.Children.append(Tran)
                         self.TipsSet.remove(Child)
                     else:
                         continue
@@ -168,10 +168,10 @@ class Network:
         for CommChannel in self.CommChannels[Nodes.index(Node)]:
             CommChannel.send_packet(Tran, Time)
         
-    def update_comm_channels(self):
+    def update_comm_channels(self, Time):
         for CCs in CommChannels:
             for CC in CCs:
-                CC.transmit_packets()
+                CC.transmit_packets(Time)
     
     def process_transactions(self, NodeLambda, Time):
         for Node in self.Nodes:
