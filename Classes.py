@@ -7,7 +7,9 @@ Created on Fri Sep 27 22:28:39 2019
 import numpy as np
 
 def main():
-    DelayMatrix = np.array([[0,1,1],[1,0,1],[1,1,0]])
+    NumNodes = 3
+    DelayMatrix = (np.ones(NumNodes, NumNodes) - np.identity(NumNodes)) # all-to-all
+    Lambdas = 5*(np.ones(NumNodes))
     Network = Network(DelayMatrix)
     
     # some loop over time
@@ -33,7 +35,7 @@ class Transaction:
 
 class Node:
     
-    def __init__(self, Network, PoWDelay = 1):
+    def __init__(self, Network, Lambda, PoWDelay = 1):
         self.TipsSet = []
         self.TempTransactions = []
         self.Tangle = []
@@ -41,6 +43,7 @@ class Node:
         self.Users = []
         self.Network = Network
         self.Queue = []
+        self.Lambda = Lambda
         
         self.TipsSet.append(Transaction(0, [], 0))
         self.Tangle.append(Transaction(0, [], 0)) # add genesis
@@ -79,8 +82,8 @@ class Node:
             if(Tran.is_tip()):
                 self.TipsSet.append(Tran)
             for Parent in Tran.Parents:
+                Parent.Children.append(Tran)
                 if Parent in self.TipsSet:
-                    Parent.Children.append(Tran)
                     self.TipsSet.remove(Child)
                 else:
                     continue
@@ -89,30 +92,7 @@ class Node:
     def add_to_queue(self, Tran):
         if (Tran not in Queue) and (Tran not in Tangle):
             Queue.append(Tran)
-        
-
-class FullNode(Node):
     
-    pass
-    
-
-class User:
-
-    def __init__(self, Id):
-        
-        self.Id = Id
-        self.NodesList = {}
-        self.IssuedTransactions = []
-
-    def issue_transaction(self, Node, NSelections, Time):
-        
-        if Node in self.NodesList:
-            self.NodesList[Node] += 1 
-        else:
-            self.NodesList[Node] = 1
-
-        Children = Node.select_tips(NSelections)
-        Node.TempTransactions.append(Transaction(Time, Children))
         
 class Packet:
     
@@ -152,11 +132,12 @@ class Network:
     
     def __init__(self, DelayMatrix):
         self.D = DelayMatrix
+        self.Lambdas = Lambdas
         self.Nodes = []
         self.CommChannels = []
         
         for i in range(np.size(D,1)):
-            Nodes.append(Node(self))
+            Nodes.append(Node(self, Lambdas[i]))
             
         for i in range(np.size(D,1)):
             RowList = []
@@ -173,9 +154,9 @@ class Network:
             for CC in CCs:
                 CC.transmit_packets(Time)
     
-    def process_transactions(self, NodeLambda, Time):
+    def process_transactions(self, Time):
         for Node in self.Nodes:
-            for i in range(np.random.poisson(NodeLambda)):
+            for i in range(np.random.poisson(Node.Lambda)):
                 Parents = Node.select_tips()
                 Node.TempTransactions.append(Transaction(Time, Parents, Node))
             Node.add_transactions(Time)
