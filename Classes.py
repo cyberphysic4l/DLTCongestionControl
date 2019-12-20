@@ -5,21 +5,23 @@ Created on Fri Sep 27 22:28:39 2019
 @author: Pietro Ferraro
 """
 import numpy as np
-
+    
 def main():
     NumNodes = 3
-    DelayMatrix = (np.ones(NumNodes, NumNodes) - np.identity(NumNodes)) # all-to-all
+    DelayMatrix = (np.ones((NumNodes, NumNodes)) - np.identity(NumNodes)) # all-to-all
     Lambdas = 5*(np.ones(NumNodes))
-    Network = Network(DelayMatrix)
+    Net = Network(DelayMatrix, Lambdas)
     
-    # some loop over time
-    NodeLambda = 10 # each Node receiving TXs to add at this rate
-    Network.process_transactions(NodeLambda, Time)
-    
+    for i in range(1200):
+        T = 0.1*i
+        Net.generate_transactions(T)
+        Net.update_comm_channels(T)
+        
+    a = 1
 
 class Transaction:
     
-    def __init__(self, ArrivalTime, Parents, No = None, Signature):
+    def __init__(self, ArrivalTime, Parents, Signature, No = None):
         self.No = No
         self.ArrivalTime = ArrivalTime
         self.Children = []
@@ -27,7 +29,7 @@ class Transaction:
         self.NodeSignature = Signature
         
     def is_tip(self):
-        if not Children:
+        if not self.Children:
             return True
         else:
             return False
@@ -71,10 +73,10 @@ class Node:
                 for Parent in Tran.Parents:
                     Parent.Children.append(Tran)
                     if Parent in self.TipsSet:
-                        self.TipsSet.remove(Child)
+                        self.TipsSet.remove(Parent)
                     else:
                         continue
-                self.Network.broadcast_transaction(self, Tran)
+                self.Network.broadcast_transaction(self, Tran, Time)
                 
         for Tran in self.Queue:
             self.Queue.remove(Tran)
@@ -84,14 +86,14 @@ class Node:
             for Parent in Tran.Parents:
                 Parent.Children.append(Tran)
                 if Parent in self.TipsSet:
-                    self.TipsSet.remove(Child)
+                    self.TipsSet.remove(Parent)
                 else:
                     continue
-            self.Network.broadcast_transaction(self, Tran)
+            self.Network.broadcast_transaction(self, Tran, Time)
                 
     def add_to_queue(self, Tran):
-        if (Tran not in Queue) and (Tran not in Tangle):
-            Queue.append(Tran)
+        if (Tran not in self.Queue) and (Tran not in self.Tangle):
+            self.Queue.append(Tran)
     
         
 class Packet:
@@ -117,48 +119,56 @@ class CommChannel:
         self.Packets = []
     
     def send_packet(self, Tran, Time):
-        Packets.append(Packet(Tran, Time))
+        self.Packets.append(Packet(Tran, Time))
     
     def transmit_packets(self, Time):
-        for Packet in self.Packets:
-            if(Time>=Packet.get_start_time()+self.Delay):
-                self.deliver_packet(Packet)
+        if self.Packets:
+            for Packet in self.Packets:
+                if(Time>=Packet.get_start_time()+self.Delay):
+                    self.deliver_packet(Packet)
+        else:
+            pass
             
     def deliver_packet(self, Packet):
-        RxNode.add_to_queue(Packet.get_transaction())
+        self.RxNode.add_to_queue(Packet.get_transaction())
         self.Packets.remove(Packet)
         
 class Network:
     
-    def __init__(self, DelayMatrix):
+    def __init__(self, DelayMatrix, Lambdas):
         self.D = DelayMatrix
         self.Lambdas = Lambdas
         self.Nodes = []
         self.CommChannels = []
         
-        for i in range(np.size(D,1)):
-            Nodes.append(Node(self, Lambdas[i]))
+        for i in range(np.size(self.D,1)):
+            self.Nodes.append(Node(self, Lambdas[i]))
             
-        for i in range(np.size(D,1)):
+        for i in range(np.size(self.D,1)):
             RowList = []
-            for j, Delay in enumerate(np.nonzero(D[i,:])):
-                Rowlist.append(CommChannel(Nodes[i],Nodes[j],Delay))
-            CommChannels.append(RowList)
+            for index in np.nonzero(self.D[i,:]):
+                RowList.append(CommChannel(self.Nodes[index[0]],self.Nodes[index[1]],self.D[index[0]][index[1]]))
+            self.CommChannels.append(RowList)
             
     def broadcast_transaction(self, Node, Tran, Time):
-        for CommChannel in self.CommChannels[Nodes.index(Node)]:
+        for CommChannel in self.CommChannels[self.Nodes.index(Node)]:
             CommChannel.send_packet(Tran, Time)
         
     def update_comm_channels(self, Time):
-        for CCs in CommChannels:
+        for CCs in self.CommChannels:
             for CC in CCs:
                 CC.transmit_packets(Time)
     
-    def process_transactions(self, Time):
+    def generate_transactions(self, Time):
         for Node in self.Nodes:
             for i in range(np.random.poisson(Node.Lambda)):
-                Parents = Node.select_tips()
+                Parents = Node.select_tips(2)
                 Node.TempTransactions.append(Transaction(Time, Parents, Node))
             Node.add_transactions(Time)
             
+
+if __name__ == "__main__":
+        main()
+        
+    
     
