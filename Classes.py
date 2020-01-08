@@ -5,19 +5,31 @@ Created on Fri Sep 27 22:28:39 2019
 @author: Pietro Ferraro
 """
 import numpy as np
+import matplotlib.pyplot as plt
     
 def main():
     NumNodes = 3
+    Step = 0.1
+    TimeSteps = 1200
     DelayMatrix = (np.ones((NumNodes, NumNodes)) - np.identity(NumNodes)) # all-to-all
-    Lambdas = 5*(np.ones(NumNodes))
+    Lambdas = 10*(np.ones(NumNodes))
     Net = Network(DelayMatrix, Lambdas)
+    Tips = np.zeros((TimeSteps, NumNodes))
     
-    for i in range(1200):
-        T = 0.1*i
+    for i in range(TimeSteps):
+        T = Step*i
         Net.generate_transactions(T)
         Net.update_comm_channels(T)
+        for Node in Net.Nodes:
+            Tips[i, Node.NodeID] = len(Node.TipsSet)
         
-    a = 1
+    plt.figure()
+    plt.plot(np.arange(0, TimeSteps*Step, Step), Tips[:,0], 'r', np.arange(0, TimeSteps*Step, Step), Tips[:,1], 'b', np.arange(0, TimeSteps*Step, Step), Tips[:,2], 'g')
+    plt.xlabel('Time')
+    plt.ylabel('Number of Tips')
+    plt.legend(['Node 0', 'Node 1', 'Node 2'])
+    plt.show()
+
 
 class Transaction:
     
@@ -37,18 +49,16 @@ class Transaction:
 
 class Node:
     
-    def __init__(self, Network, Lambda, PoWDelay = 1):
-        self.TipsSet = []
+    def __init__(self, Network, Lambda, NodeID, Genesis, PoWDelay = 1):
+        self.TipsSet = [Genesis]
+        self.Tangle = [Genesis]
         self.TempTransactions = []
-        self.Tangle = []
         self.PoWDelay = PoWDelay
         self.Users = []
         self.Network = Network
         self.Queue = []
         self.Lambda = Lambda
-        
-        self.TipsSet.append(Transaction(0, [], 0))
-        self.Tangle.append(Transaction(0, [], 0)) # add genesis
+        self.NodeID = NodeID
         
     def report(self):
         return None
@@ -81,14 +91,17 @@ class Node:
         for Tran in self.Queue:
             self.Queue.remove(Tran)
             self.Tangle.append(Tran)
-            if(Tran.is_tip()):
+            if not Tran.Children:
                 self.TipsSet.append(Tran)
-            for Parent in Tran.Parents:
-                Parent.Children.append(Tran)
-                if Parent in self.TipsSet:
-                    self.TipsSet.remove(Parent)
-                else:
-                    continue
+            if Tran.Parents:
+                for Parent in Tran.Parents:
+                    Parent.Children.append(Tran)
+                    if Parent in self.TipsSet:
+                        self.TipsSet.remove(Parent)
+                    else:
+                        continue
+            else:
+                pass
             self.Network.broadcast_transaction(self, Tran, Time)
                 
     def add_to_queue(self, Tran):
@@ -140,14 +153,15 @@ class Network:
         self.Lambdas = Lambdas
         self.Nodes = []
         self.CommChannels = []
+        Genesis = Transaction(0, [], [])
         
         for i in range(np.size(self.D,1)):
-            self.Nodes.append(Node(self, Lambdas[i]))
+            self.Nodes.append(Node(self, Lambdas[i], i, Genesis))
             
         for i in range(np.size(self.D,1)):
             RowList = []
-            for index in np.nonzero(self.D[i,:]):
-                RowList.append(CommChannel(self.Nodes[index[0]],self.Nodes[index[1]],self.D[index[0]][index[1]]))
+            for j in np.nditer(np.nonzero(self.D[i,:])):
+                RowList.append(CommChannel(self.Nodes[i],self.Nodes[j],self.D[i][j]))
             self.CommChannels.append(RowList)
             
     def broadcast_transaction(self, Node, Tran, Time):
@@ -161,9 +175,9 @@ class Network:
     
     def generate_transactions(self, Time):
         for Node in self.Nodes:
-            for i in range(np.random.poisson(Node.Lambda)):
+            for i in range(np.random.poisson(0.1*Node.Lambda)):
                 Parents = Node.select_tips(2)
-                Node.TempTransactions.append(Transaction(Time, Parents, Node))
+                Node.TempTransactions.append(Transaction(Time, Parents, Node.NodeID))
             Node.add_transactions(Time)
             
 
