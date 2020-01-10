@@ -33,25 +33,24 @@ def main():
             Lmds[i, Node.NodeID] = Node.Lambda
     
     plt.close('all')
-    plt.figure(1)
+    fig, ax = plt.subplots(3, 1)
     for Node in Net.Nodes:
-        plt.plot(np.arange(0, TimeSteps*STEP, STEP), Tips[:,Node.NodeID])
-    plt.xlabel('Time')
-    plt.ylabel('Number of Tips')
-    plt.show()
+        ax[0].plot(np.arange(0, TimeSteps*STEP, STEP), Tips[:,Node.NodeID])
+    ax[0].set_xlabel('Time')
+    ax[0].set_ylabel('Number of Tips')
+    ax[0].legend(['Node 0', 'Node 1', 'Node 2', 'Node 3'], loc = "upper left")
     
-    plt.figure(2)
     for Node in Net.Nodes:
-        plt.plot(np.arange(0, TimeSteps*STEP, STEP), QLen[:,Node.NodeID])
-    plt.xlabel('Time')
-    plt.ylabel('Queue Length')
-    plt.show()
+        ax[1].plot(np.arange(0, TimeSteps*STEP, STEP), QLen[:,Node.NodeID])
+    ax[1].set_xlabel('Time')
+    ax[1].set_ylabel('Queue Length')
+    ax[1].legend(['Node 0', 'Node 1', 'Node 2', 'Node 3'], loc = "upper left")
     
-    plt.figure(3)
     for Node in Net.Nodes:
-        plt.plot(np.arange(0, TimeSteps*STEP, STEP), Lmds[:,Node.NodeID])
-    plt.xlabel('Time')
-    plt.ylabel('Lambda')
+        ax[2].plot(np.arange(0, TimeSteps*STEP, STEP), Lmds[:,Node.NodeID])
+    ax[2].set_xlabel('Time')
+    ax[2].set_ylabel('Lambda')
+    ax[2].legend(['Node 0', 'Node 1', 'Node 2', 'Node 3'], loc = "upper left")
     plt.show()
 
 
