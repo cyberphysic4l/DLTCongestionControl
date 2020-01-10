@@ -1,2 +1,2 @@
 # IOTARateControl
-Python simulator for AIMD rate control in the IOTA network
+Python simulator for AIMD congestion control in the IOTA network
