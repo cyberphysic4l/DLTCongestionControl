@@ -1,2 +1,2 @@
 # IOTARateControl
-Python code for simulation IOTA network
+Python simulator for AIMD rate control in the IOTA network
