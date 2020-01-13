@@ -9,7 +9,8 @@ import matplotlib.pyplot as plt
 import networkx as nx
 
 STEP = 0.1
-WAIT_TIME = 3
+WAIT_TIME = 5
+MAX_QUEUE_LEN = 20
 NUM_NODES = 10
 NUM_NEIGHBOURS = 4
     
@@ -79,7 +80,7 @@ class BackOff:
 
 class Node:
     
-    def __init__(self, Network, Lambda, Nu, Alpha, Beta, Mana, NodeID, Genesis, PoWDelay = 1, MaxQueueLen = 20):
+    def __init__(self, Network, Lambda, Nu, Alpha, Beta, Mana, NodeID, Genesis, PoWDelay = 1):
         self.TipsSet = [Genesis]
         self.Tangle = [Genesis]
         self.TempTransactions = []
@@ -92,7 +93,6 @@ class Node:
         self.Alpha = Alpha
         self.Beta = Beta
         self.NodeID = NodeID
-        self.MaxQueueLen = MaxQueueLen
         self.LastBackOff = []
         self.LastCongestion = []
         self.Mana = Mana
@@ -143,7 +143,7 @@ class Node:
             self.Network.broadcast_data(self, self.Queue[i], Time)
             del self.Queue[i]
             
-        if len(self.Queue) > self.MaxQueueLen:
+        if len(self.Queue) > MAX_QUEUE_LEN:
             if self.LastCongestion:
                 if self.LastCongestion < Time-WAIT_TIME:
                     NodeTrans = np.zeros(NUM_NODES)
