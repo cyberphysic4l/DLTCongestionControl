@@ -6,22 +6,26 @@ Created on Fri Sep 27 22:28:39 2019
 """
 import numpy as np
 import matplotlib.pyplot as plt
+import networkx as nx
 
 STEP = 0.1
-WAIT_TIME = 5
+WAIT_TIME = 3
+NUM_NODES = 10
+NUM_NEIGHBOURS = 4
     
 def main():
-    NumNodes = 4
     TimeSteps = 6000
-    DelayMatrix = (np.ones((NumNodes, NumNodes)) - np.identity(NumNodes)) # all-to-all
-    Lambdas = 0.01*(np.ones(NumNodes))
-    Nus = 10*(np.ones(NumNodes))
-    Alphas = 0.01*(np.ones(NumNodes))
-    Betas = 0.7*(np.ones(NumNodes))
-    Net = Network(DelayMatrix, Lambdas, Nus, Alphas, Betas)
-    Tips = np.zeros((TimeSteps, NumNodes))
-    QLen = np.zeros((TimeSteps, NumNodes))
-    Lmds = np.zeros((TimeSteps, NumNodes))
+    G = nx.random_regular_graph(NUM_NEIGHBOURS, NUM_NODES)
+    DelayMatrix = np.asarray(nx.to_numpy_matrix(G))
+    Lambdas = 0.1*(np.ones(NUM_NODES))
+    Nus = 20*(np.ones(NUM_NODES))
+    Alphas = 0.01*(np.ones(NUM_NODES))
+    Betas = 0.7*(np.ones(NUM_NODES))
+    Manas = np.ones(NUM_NODES)
+    Net = Network(DelayMatrix, Lambdas, Nus, Alphas, Betas, Manas)
+    Tips = np.zeros((TimeSteps, NUM_NODES))
+    QLen = np.zeros((TimeSteps, NUM_NODES))
+    Lmds = np.zeros((TimeSteps, NUM_NODES))
     
     for i in range(TimeSteps):
         T = STEP*i
@@ -38,40 +42,44 @@ def main():
         ax[0].plot(np.arange(0, TimeSteps*STEP, STEP), Tips[:,Node.NodeID])
     ax[0].set_xlabel('Time')
     ax[0].set_ylabel('Number of Tips')
-    ax[0].legend(['Node 0', 'Node 1', 'Node 2', 'Node 3'], loc = "upper left")
     
     for Node in Net.Nodes:
         ax[1].plot(np.arange(0, TimeSteps*STEP, STEP), QLen[:,Node.NodeID])
     ax[1].set_xlabel('Time')
     ax[1].set_ylabel('Queue Length')
-    ax[1].legend(['Node 0', 'Node 1', 'Node 2', 'Node 3'], loc = "upper left")
     
     for Node in Net.Nodes:
         ax[2].plot(np.arange(0, TimeSteps*STEP, STEP), Lmds[:,Node.NodeID])
     ax[2].set_xlabel('Time')
     ax[2].set_ylabel('Lambda')
-    ax[2].legend(['Node 0', 'Node 1', 'Node 2', 'Node 3'], loc = "upper left")
     plt.show()
 
 
 class Transaction:
     
-    def __init__(self, ArrivalTime, Parents, Signature):
+    def __init__(self, ArrivalTime, Parents, NodeID):
         self.ArrivalTime = ArrivalTime
         self.Children = []
         self.Parents = Parents
-        self.NodeSignature = Signature
+        self.NodeID = NodeID
         
     def is_tip(self):
         if not self.Children:
             return True
         else:
             return False
+
+class BackOff:
+    
+    def _init_(self, RXNodeID):
+        self.RXNodeID = RXNodeID
         
+    def get_rxnode_id(self):
+        return self.RXNodeID
 
 class Node:
     
-    def __init__(self, Network, Lambda, Nu, Alpha, Beta, NodeID, Genesis, PoWDelay = 1, MaxQueueLen = 20):
+    def __init__(self, Network, Lambda, Nu, Alpha, Beta, Mana, NodeID, Genesis, PoWDelay = 1, MaxQueueLen = 20):
         self.TipsSet = [Genesis]
         self.Tangle = [Genesis]
         self.TempTransactions = []
@@ -86,6 +94,8 @@ class Node:
         self.NodeID = NodeID
         self.MaxQueueLen = MaxQueueLen
         self.LastBackOff = []
+        self.LastCongestion = []
+        self.Mana = Mana
         
     def report(self):
         return None
@@ -134,6 +144,13 @@ class Node:
             del self.Queue[i]
             
         if len(self.Queue) > self.MaxQueueLen:
+            if self.LastCongestion:
+                if self.LastCongestion < Time-WAIT_TIME:
+                    NodeTrans = np.zeros(NUM_NODES)
+                    for Tran in self.Queue:
+                        NodeTrans[Tran.NodeID] += 1
+                    
+                
             self.Network.broadcast_data(self, 'back off', Time)
                 
     def add_to_queue(self, Tran):
@@ -196,7 +213,7 @@ class CommChannel:
         
 class Network:
     
-    def __init__(self, DelayMatrix, Lambdas, Nus, Alphas, Betas):
+    def __init__(self, DelayMatrix, Lambdas, Nus, Alphas, Betas, Manas):
         self.D = DelayMatrix
         self.Lambdas = Lambdas
         self.Nodes = []
@@ -204,7 +221,7 @@ class Network:
         Genesis = Transaction(0, [], [])
         
         for i in range(np.size(self.D,1)):
-            self.Nodes.append(Node(self, Lambdas[i], Nus[i], Alphas[i], Betas[i], i, Genesis))
+            self.Nodes.append(Node(self, Lambdas[i], Nus[i], Alphas[i], Betas[i], Manas[i], i, Genesis))
             
         for i in range(np.size(self.D,1)):
             RowList = []
