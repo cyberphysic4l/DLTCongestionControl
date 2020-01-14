@@ -19,7 +19,7 @@ def main():
     """
     Setup simulation inputs and instantiate output arrays
     """
-    TimeSteps = SIM_TIME/STEP
+    TimeSteps = int(SIM_TIME/STEP)
     # Generate network topology
     G = nx.random_regular_graph(NUM_NEIGHBOURS, NUM_NODES)
     # Get adjacency matrix and weight by delay at each channel
@@ -27,7 +27,7 @@ def main():
     # Node parameters
     Lambdas = 0.1*(np.ones(NUM_NODES))
     Nus = 20*(np.ones(NUM_NODES))
-    Alphas = 0.1*(np.ones(NUM_NODES))
+    Alphas = 0.05*(np.ones(NUM_NODES))
     Betas = 0.7*(np.ones(NUM_NODES))
     Manas = np.ones(NUM_NODES)
     # Initialise output arrays
@@ -42,9 +42,8 @@ def main():
     for i in range(TimeSteps):
         # discrete time step size specified by global variable STEP
         T = STEP*i
-        # next two lines generate new transactions for this time step and update network for all new events
-        Net.generate_transactions(T)
-        Net.update_comm_channels(T)
+        # update network for all new events in this time step
+        Net.simulate(T)
         # save summary results in output arrays
         for Node in Net.Nodes:
             Tips[i, Node.NodeID] = len(Node.TipsSet)
@@ -87,18 +86,6 @@ class Transaction:
         else:
             return False
 
-class BackOff:
-    """
-    *Not used yet*
-    This class represents the data that would need to be sent in a
-    packet to instruct a specific node to back off its send rate
-    """
-    def _init_(self, RXNodeID):
-        self.RXNodeID = RXNodeID
-        
-    def get_rxnode_id(self):
-        return self.RXNodeID
-
 class Node:
     
     def __init__(self, Network, Lambda, Nu, Alpha, Beta, Mana, NodeID, Genesis, PoWDelay = 1):
@@ -114,13 +101,10 @@ class Node:
         self.Alpha = Alpha
         self.Beta = Beta
         self.NodeID = NodeID
+        self.BackOff = False
         self.LastBackOff = []
         self.LastCongestion = []
         self.Mana = Mana
-        
-    def report(self):
-        return None
-        
         
     def select_tips(self, NumberOfSelections):
         """
@@ -132,81 +116,82 @@ class Node:
             Selection.append(self.TipsSet[np.random.randint(NumberOfTips)])
         return Selection
 
-    def add_transactions(self, Time):
-        """
-        This method includes:
-            1. PoW and broadcast of newly added TXs
-            2. Processing queue of transactions received from neighbours
-            3. Checking queue length for congestion events and send back-offs
-        """
-        # 1. process newly created TXs when finished PoW
-        for Tran in self.TempTransactions:
-            if (Tran.ArrivalTime + self.PoWDelay) <= Time:
-                self.TempTransactions.remove(Tran)
-                self.Tangle.append(Tran)
-                self.TipsSet.append(Tran)
-                for Parent in Tran.Parents:
-                    Parent.Children.append(Tran)
-                    if Parent in self.TipsSet:
-                        self.TipsSet.remove(Parent)
-                    else:
-                        continue
-                self.Network.broadcast_data(self, Tran, Time)
-        
-        # 2. process TXs in queue of TXs received from neighbours
-        for i in range(np.random.poisson(STEP*self.Nu)):
+    def process_own_txs(self, Time):
+        # process newly created TXs when finished PoW
+        if self.TempTransactions:
+            for Tran in self.TempTransactions:
+                t = Tran.ArrivalTime + self.PoWDelay
+                if t <= Time:
+                    self.TempTransactions.remove(Tran)
+                    self.Tangle.append(Tran)
+                    self.TipsSet.append(Tran)
+                    for Parent in Tran.Parents:
+                        Parent.Children.append(Tran)
+                        if Parent in self.TipsSet:
+                            self.TipsSet.remove(Parent)
+                        else:
+                            continue
+                    self.Network.broadcast_data(self, Tran, t)
+    
+    def process_queue(self, Time):
+        # first, sort the queue by the time the TXs arrived there (FIFO)
+        self.Queue.sort(key=lambda p: p.EndTime)
+        # process TXs in queue of TXs received from neighbours
+        ProcessedTXs = np.sort(np.random.uniform(Time, Time+STEP, np.random.poisson(STEP*self.Nu)))
+        for i, t in enumerate(ProcessedTXs):
             if i >= len(self.Queue):
                 break
-            self.Tangle.append(self.Queue[i])
-            if not self.Queue[i].Children:
-                self.TipsSet.append(self.Queue[i])
-            if self.Queue[i].Parents:
-                for Parent in self.Queue[i].Parents:
-                    Parent.Children.append(self.Queue[i])
+            
+            self.Tangle.append(self.Queue[i].Data)
+            if not self.Queue[i].Data.Children:
+                self.TipsSet.append(self.Queue[i].Data)
+            if self.Queue[i].Data.Parents:
+                for Parent in self.Queue[i].Data.Parents:
+                    Parent.Children.append(self.Queue[i].Data)
                     if Parent in self.TipsSet:
                         self.TipsSet.remove(Parent)
                     else:
                         continue
             else:
                 pass
-            self.Network.broadcast_data(self, self.Queue[i], Time)
+            self.Network.broadcast_data(self, self.Queue[i].Data, t)
             del self.Queue[i]
-            
-        # 3. check if congestion is occuring and send back-offs
+    
+    def check_congestion(self, Time):
+        # check if congestion is occuring and send back-offs
         if len(self.Queue) > MAX_QUEUE_LEN:
             if self.LastCongestion:
-                if self.LastCongestion < Time-WAIT_TIME:
+                if Time> self.LastCongestion + WAIT_TIME:
                     NodeTrans = np.zeros(NUM_NODES)
-                    for Tran in self.Queue:
-                        NodeTrans[Tran.NodeID] += 1 
+                    for Packet in self.Queue:
+                        NodeTrans[Packet.Data.NodeID] += 1 
             self.Network.broadcast_data(self, 'back off', Time)
-                
-    def add_to_queue(self, Tran):
-        """
-        Includes basic prefilter to remove transactions already processed
-        """
-        if (Tran not in self.Queue) and (Tran not in self.Tangle):
-            self.Queue.append(Tran)
             
-    def increase_lambda(self):
-        """
-        AIMD additive increase
-        """
-        self.Lambda += self.Alpha*STEP
-        
-    def back_off(self, Time):
-        """
-        AIMD multiplicative decrease
-        Includes check of wait time etc
-        """
-        if self.LastBackOff:
-            if self.LastBackOff < Time-WAIT_TIME:
+    def aimd_update(self, Time):
+        if self.BackOff:
+            if self.LastBackOff:
+                if Time >= self.LastBackOff + WAIT_TIME:
+                    self.Lambda = self.Lambda*self.Beta
+                    self.LastBackOff = Time
+                else:
+                    self.BackOff = False
+            else:
                 self.Lambda = self.Lambda*self.Beta
                 self.LastBackOff = Time
         else:
-            self.Lambda = self.Lambda*self.Beta
-            self.LastBackOff = Time
-    
+            self.Lambda += self.Alpha*STEP
+            
+                
+    def add_to_queue(self, Packet):
+        """
+        Includes basic prefilter to remove transactions already processed
+        """
+        Tran = Packet.Data
+        for p in self.Queue:
+            if p.Data == Tran:
+                return
+        if Tran not in self.Tangle:
+            self.Queue.append(Packet)
         
 class Packet:
     """
@@ -217,15 +202,8 @@ class Packet:
         # can be a TX or a back off notification
         self.Data = Data
         self.StartTime = StartTime
-        
-    def get_start_time(self):
-        return self.StartTime
+        self.EndTime = []
     
-    
-    def get_data(self):
-        return self.Data
-    
-
 class CommChannel:
     """
     Object for moving packets from node to node and simulating communication
@@ -251,8 +229,9 @@ class CommChannel:
         """
         if self.Packets:
             for Packet in self.Packets:
-                if(Time>=Packet.get_start_time()+self.Delay):
-                    self.deliver_packet(Packet, Time)
+                t = Packet.StartTime+self.Delay
+                if(t<=Time):
+                    self.deliver_packet(Packet, t)
         else:
             pass
             
@@ -260,13 +239,13 @@ class CommChannel:
         """
         When packet has arrived at receiving node, process it
         """
-        Data = Packet.get_data()
-        if isinstance(Data, Transaction):
-            # if this is a transaction, add it to queue
-            self.RxNode.add_to_queue(Data)
+        Packet.EndTime = Time
+        if isinstance(Packet.Data, Transaction):
+            # if this is a transaction, add the Packet to queue
+            self.RxNode.add_to_queue(Packet)
         else: 
             # else this is a back off notification
-            self.RxNode.back_off(Time)
+            self.RxNode.BackOff = True
         self.Packets.remove(Packet)
         
 class Network:
@@ -298,25 +277,27 @@ class Network:
         for CommChannel in self.CommChannels[self.Nodes.index(Node)]:
             CommChannel.send_packet(Data, Time)
         
-    def update_comm_channels(self, Time):
+    def simulate(self, Time):
+        """
+        Each node generate and process new transactions
+        """
+        for Node in self.Nodes:
+            if Time>500:
+                a = 1
+            NewTXs = np.sort(np.random.uniform(Time, Time+STEP, np.random.poisson(STEP*Node.Lambda)))
+            for t in NewTXs:
+                Parents = Node.select_tips(2)
+                Node.TempTransactions.append(Transaction(t, Parents, Node.NodeID))
+            Node.process_own_txs(Time)
+            Node.process_queue(Time)
+            Node.check_congestion(Time)
+            Node.aimd_update(Time)
         """
         Move packets through all comm channels
         """
         for CCs in self.CommChannels:
             for CC in CCs:
                 CC.transmit_packets(Time)
-    
-    def generate_transactions(self, Time):
-        """
-        Each node generate and process new transactions
-        """
-        for Node in self.Nodes:
-            for i in range(np.random.poisson(STEP*Node.Lambda)):
-                Parents = Node.select_tips(2)
-                Node.TempTransactions.append(Transaction(Time, Parents, Node.NodeID))
-            Node.add_transactions(Time)
-            Node.increase_lambda() # AIMD update
-            
 
 if __name__ == "__main__":
         main()
