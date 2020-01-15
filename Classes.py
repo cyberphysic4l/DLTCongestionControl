@@ -14,6 +14,8 @@ WAIT_TIME = 5
 MAX_QUEUE_LEN = 20
 NUM_NODES = 10
 NUM_NEIGHBOURS = 4
+MANA = np.ones(NUM_NODES) # Assume Mana is global
+MANA[0:5] = 10*np.ones(5)
     
 def main():
     """
@@ -28,9 +30,9 @@ def main():
     # Node parameters
     Lambdas = 0.1*(np.ones(NUM_NODES))
     Nus = 20*(np.ones(NUM_NODES))
-    Alphas = 0.05*(np.ones(NUM_NODES))
+    Alphas = 0.01*(np.ones(NUM_NODES))
     Betas = 0.7*(np.ones(NUM_NODES))
-    Manas = np.ones(NUM_NODES)
+    
     # Initialise output arrays
     Tips = np.zeros((TimeSteps, NUM_NODES))
     QLen = np.zeros((TimeSteps, NUM_NODES))
@@ -39,7 +41,7 @@ def main():
     """
     Run simulation for the specified time
     """
-    Net = Network(AdjMatrix, Lambdas, Nus, Alphas, Betas, Manas)
+    Net = Network(AdjMatrix, Lambdas, Nus, Alphas, Betas)
     for i in range(TimeSteps):
         # discrete time step size specified by global variable STEP
         T = STEP*i
@@ -93,7 +95,7 @@ class Node:
     """
     Object to simulate an IOTA full node
     """
-    def __init__(self, Network, Lambda, Nu, Alpha, Beta, Mana, NodeID, Genesis, PoWDelay = 1):
+    def __init__(self, Network, Lambda, Nu, Alpha, Beta, NodeID, Genesis, PoWDelay = 1):
         self.TipsSet = [Genesis]
         self.Tangle = [Genesis]
         self.TempTransactions = []
@@ -109,7 +111,7 @@ class Node:
         self.BackOff = False
         self.LastBackOff = []
         self.LastCongestion = []
-        self.Mana = Mana
+        self.CongNotifs = []
         
     def select_tips(self, NumberOfSelections):
         """
@@ -171,26 +173,43 @@ class Node:
         """
         if len(self.Queue) > MAX_QUEUE_LEN:
             if self.LastCongestion:
-                if Time> self.LastCongestion + WAIT_TIME:
-                    NodeTrans = np.zeros(NUM_NODES)
-                    for Packet in self.Queue:
-                        NodeTrans[Packet.Data.NodeID] += 1 
-            self.Network.broadcast_data(self, 'back off', Time)
+                if Time < self.LastCongestion + WAIT_TIME:
+                    return
+            # count number of TXs from each node in the queue
+            NodeTrans = np.zeros(NUM_NODES)
+            for Packet in self.Queue:
+                NodeTrans[Packet.Data.NodeID] += 1
+            
+            # Probability of backing off
+            Probs = (NodeTrans/MANA)/sum(NodeTrans/MANA)
+            RxNodeID = np.random.choice(range(NUM_NODES), p=Probs)
+            CongNotif = CongestionNotification(self.NodeID, RxNodeID, Time)
+            self.CongNotifs.append(CongNotif)
+            self.Network.broadcast_data(self, CongNotif, Time)
+            
+    def process_cong_notif(self, Packet, Time):
+        """
+        Process a received congestion notification
+        """
+        CongNotif = Packet.Data
+        if CongNotif not in self.CongNotifs:
+            self.CongNotifs.append(CongNotif)
+            if CongNotif.RxNodeID == self.NodeID:
+                self.BackOff = True
+            else:
+                self.Network.broadcast_data(self, CongNotif, Time)
             
     def aimd_update(self, Time):
         """
         Additively increase of multiplicatively decrease lambda
         """
+        if self.LastBackOff:
+            if Time < self.LastBackOff + WAIT_TIME:
+                self.BackOff = False
+                return
         if self.BackOff:
-            if self.LastBackOff:
-                if Time >= self.LastBackOff + WAIT_TIME:
-                    self.Lambda = self.Lambda*self.Beta
-                    self.LastBackOff = Time
-                else:
-                    self.BackOff = False
-            else:
-                self.Lambda = self.Lambda*self.Beta
-                self.LastBackOff = Time
+            self.Lambda = self.Lambda*self.Beta
+            self.LastBackOff = Time
         else:
             self.Lambda += self.Alpha*STEP
             
@@ -211,6 +230,15 @@ class Node:
         if Tran not in self.Tangle:
             self.Queue.append(Packet)
         
+class CongestionNotification:
+    """
+    Object for data to be sent to tell nodes to back off etc
+    """
+    def __init__(self, TxNodeID, RxNodeID, CongTime):
+        self.TxNodeID = TxNodeID
+        self.RxNodeID = RxNodeID
+        self.CongTime = CongTime
+
 class Packet:
     """
     Object for sending data including TXs and back off notifications over
@@ -261,16 +289,16 @@ class CommChannel:
         if isinstance(Packet.Data, Transaction):
             # if this is a transaction, add the Packet to queue
             self.RxNode.add_to_queue(Packet)
-        else: 
+        elif isinstance(Packet.Data, CongestionNotification): 
             # else this is a back off notification
-            self.RxNode.BackOff = True
+            self.RxNode.process_cong_notif(Packet, Time)
         self.Packets.remove(Packet)
         
 class Network:
     """
     Object containing all nodes and their interconnections
     """
-    def __init__(self, AdjMatrix, Lambdas, Nus, Alphas, Betas, Manas):
+    def __init__(self, AdjMatrix, Lambdas, Nus, Alphas, Betas):
         self.A = AdjMatrix
         self.Lambdas = Lambdas
         self.Nodes = []
@@ -278,7 +306,7 @@ class Network:
         Genesis = Transaction(0, [], [])
         # Create nodes
         for i in range(np.size(self.A,1)):
-            self.Nodes.append(Node(self, Lambdas[i], Nus[i], Alphas[i], Betas[i], Manas[i], i, Genesis))
+            self.Nodes.append(Node(self, Lambdas[i], Nus[i], Alphas[i], Betas[i], i, Genesis))
         # Create list of comm channels corresponding to each node
         for i in range(np.size(self.A,1)):
             RowList = []
