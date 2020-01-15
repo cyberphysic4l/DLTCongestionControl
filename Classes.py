@@ -23,7 +23,8 @@ def main():
     # Generate network topology
     G = nx.random_regular_graph(NUM_NEIGHBOURS, NUM_NODES)
     # Get adjacency matrix and weight by delay at each channel
-    AdjMatrix = 1*np.asarray(nx.to_numpy_matrix(G))
+    ChannelDelays = 0.9*np.ones((NUM_NODES, NUM_NODES))+0.2*np.random.rand(NUM_NODES, NUM_NODES)
+    AdjMatrix = np.multiply(1*np.asarray(nx.to_numpy_matrix(G)), ChannelDelays)
     # Node parameters
     Lambdas = 0.1*(np.ones(NUM_NODES))
     Nus = 20*(np.ones(NUM_NODES))
@@ -73,7 +74,9 @@ def main():
 
 
 class Transaction:
-    
+    """
+    Object to simulate a transaction its edges in the DAG
+    """
     def __init__(self, ArrivalTime, Parents, NodeID):
         self.ArrivalTime = ArrivalTime
         self.Children = []
@@ -87,7 +90,9 @@ class Transaction:
             return False
 
 class Node:
-    
+    """
+    Object to simulate an IOTA full node
+    """
     def __init__(self, Network, Lambda, Nu, Alpha, Beta, Mana, NodeID, Genesis, PoWDelay = 1):
         self.TipsSet = [Genesis]
         self.Tangle = [Genesis]
@@ -117,7 +122,9 @@ class Node:
         return Selection
 
     def process_own_txs(self, Time):
-        # process newly created TXs when finished PoW
+        """
+        Process pending TXs as they finish PoW
+        """
         if self.TempTransactions:
             for Tran in self.TempTransactions:
                 t = Tran.ArrivalTime + self.PoWDelay
@@ -134,14 +141,15 @@ class Node:
                     self.Network.broadcast_data(self, Tran, t)
     
     def process_queue(self, Time):
+        """
+        Process TXs in queue of TXs received from neighbours
+        """
         # first, sort the queue by the time the TXs arrived there (FIFO)
         self.Queue.sort(key=lambda p: p.EndTime)
-        # process TXs in queue of TXs received from neighbours
         ProcessedTXs = np.sort(np.random.uniform(Time, Time+STEP, np.random.poisson(STEP*self.Nu)))
         for i, t in enumerate(ProcessedTXs):
             if i >= len(self.Queue):
                 break
-            
             self.Tangle.append(self.Queue[i].Data)
             if not self.Queue[i].Data.Children:
                 self.TipsSet.append(self.Queue[i].Data)
@@ -158,7 +166,9 @@ class Node:
             del self.Queue[i]
     
     def check_congestion(self, Time):
-        # check if congestion is occuring and send back-offs
+        """
+        Check if congestion is occuring and send back-offs
+        """
         if len(self.Queue) > MAX_QUEUE_LEN:
             if self.LastCongestion:
                 if Time> self.LastCongestion + WAIT_TIME:
@@ -168,6 +178,9 @@ class Node:
             self.Network.broadcast_data(self, 'back off', Time)
             
     def aimd_update(self, Time):
+        """
+        Additively increase of multiplicatively decrease lambda
+        """
         if self.BackOff:
             if self.LastBackOff:
                 if Time >= self.LastBackOff + WAIT_TIME:
@@ -184,12 +197,17 @@ class Node:
                 
     def add_to_queue(self, Packet):
         """
-        Includes basic prefilter to remove transactions already processed
+        Add to queue if not already received and/or processed
         """
         Tran = Packet.Data
+        # check TX is not already in the queue in different packet
         for p in self.Queue:
             if p.Data == Tran:
+                if Packet.EndTime < p.EndTime:
+                    self.Queue.remove(p)
+                    self.Queue.append(Packet)
                 return
+        # check TX is not already in this node's Tangle
         if Tran not in self.Tangle:
             self.Queue.append(Packet)
         
@@ -258,11 +276,9 @@ class Network:
         self.Nodes = []
         self.CommChannels = []
         Genesis = Transaction(0, [], [])
-        
         # Create nodes
         for i in range(np.size(self.A,1)):
             self.Nodes.append(Node(self, Lambdas[i], Nus[i], Alphas[i], Betas[i], Manas[i], i, Genesis))
-           
         # Create list of comm channels corresponding to each node
         for i in range(np.size(self.A,1)):
             RowList = []
@@ -282,8 +298,6 @@ class Network:
         Each node generate and process new transactions
         """
         for Node in self.Nodes:
-            if Time>500:
-                a = 1
             NewTXs = np.sort(np.random.uniform(Time, Time+STEP, np.random.poisson(STEP*Node.Lambda)))
             for t in NewTXs:
                 Parents = Node.select_tips(2)
