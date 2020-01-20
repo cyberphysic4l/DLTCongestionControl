@@ -8,12 +8,15 @@ import numpy as np
 import matplotlib.pyplot as plt
 import networkx as nx
 
+prop_cycle = plt.rcParams['axes.prop_cycle']
+colors = prop_cycle.by_key()['color']
+
 SIM_TIME = 600
 STEP = 0.1
 WAIT_TIME = 5
 MAX_INBOX_LEN = 20
-NUM_NODES = 4
-NUM_NEIGHBOURS = 3
+NUM_NODES = 5
+NUM_NEIGHBOURS = 4
 MANA = np.ones(NUM_NODES) # Assume Mana is global
     
 def main():
@@ -23,21 +26,20 @@ def main():
     TimeSteps = int(SIM_TIME/STEP)
     # Generate network topology
     G = nx.random_regular_graph(NUM_NEIGHBOURS, NUM_NODES)
-    
     # Get adjacency matrix and weight by delay at each channel
     ChannelDelays = 0.9*np.ones((NUM_NODES, NUM_NODES))+0.2*np.random.rand(NUM_NODES, NUM_NODES)
     AdjMatrix = np.multiply(1*np.asarray(nx.to_numpy_matrix(G)), ChannelDelays)
     # Node parameters
     Lambdas = 0.1*(np.ones(NUM_NODES))
     Nus = 10*(np.ones(NUM_NODES))
-    Alphas = 0.1*(np.ones(NUM_NODES))
+    Alphas = 0.01*(np.ones(NUM_NODES))
     Betas = 0.7*(np.ones(NUM_NODES))
     
     # Initialise output arrays
     Tips = np.zeros((TimeSteps, NUM_NODES))
     QLen = np.zeros((TimeSteps, NUM_NODES))
     Lmds = np.zeros((TimeSteps, NUM_NODES))
-    Sim = np.zeros(TimeSteps)
+    #Sim = np.zeros((TimeSteps, NUM_NODES))
     
     """
     Run simulation for the specified time
@@ -52,14 +54,14 @@ def main():
         for Node in Net.Nodes:
             Tips[i, Node.NodeID] = len(Node.TipsSet)
             QLen[i, Node.NodeID] = len(Node.Inbox)
-            Lmds[i, Node.NodeID] = Net.Nodes[0].Lambdas[Node.NodeID]
-        Sim[i] = Net.node_similartiy()
+            Lmds[i, Node.NodeID] = Node.Lambdas[0]
+    print(np.average(Lmds, axis=0))
     
     """
     Plot results
     """
     plt.close('all')
-    fig, ax = plt.subplots(4, 1)
+    fig, ax = plt.subplots(3, 1)
     
     for Node in Net.Nodes:
         ax[0].plot(np.arange(0, TimeSteps*STEP, STEP), Tips[:,Node.NodeID])
@@ -76,14 +78,10 @@ def main():
     ax[2].set_xlabel('Time')
     ax[2].set_ylabel('Lambda')
     
-    ax[3].plot(np.arange(0, TimeSteps*STEP, STEP), Sim)
-    ax[3].set_xlabel('Time')
-    ax[3].set_ylabel('Sigma')
-    
     plt.show()
     plt.figure()
     pos = nx.spring_layout(G)
-    nx.draw(G, pos, width=2)
+    nx.draw(G, pos, node_color=colors[0:NUM_NODES])
     plt.show()
 
 
@@ -243,9 +241,9 @@ class Node:
                 if Time < self.LastBackOff[i] + WAIT_TIME:
                     self.BackOff[i] = False
                     continue
-            if i==0:
+            if i==0: # for self
                 Alpha = self.Alpha
-            else:
+            else: # for neighbours
                 Alpha = self.Alpha*NUM_NODES
             if self.BackOff[i]:
                 self.Lambdas[i] = self.Lambdas[i]*self.Beta
@@ -391,15 +389,15 @@ class Network:
         for CCs in self.CommChannels:
             for CC in CCs:
                 CC.transmit_packets(Time)
-                
+    """     
     def node_similartiy(self):
         D = np.identity(NUM_NODES)
         for i, iNode in enumerate(self.Nodes):
             for j, jNode in enumerate(self.Nodes):
-                D[i][j] = len(set(iNode.Tangle) & set(jNode.Tangle))/len(set(iNode.Tangle) | set(jNode.Tangle))
-        sigma = (1/(NUM_NODES*(NUM_NODES-1)))*(np.linalg.norm(D)-NUM_NODES)
+                D[i][j] = len(set(iNode.Tangle) - set(jNode.Tangle)) + len(set(jNode.Tangle) - set(iNode.Tangle))
+        sigma = (1/(NUM_NODES*(NUM_NODES-1)))*(np.linalg.norm(D, axis=1)-NUM_NODES)
         return sigma
-
+    """
 if __name__ == "__main__":
         main()
         
