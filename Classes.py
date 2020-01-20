@@ -12,8 +12,8 @@ SIM_TIME = 600
 STEP = 0.1
 WAIT_TIME = 5
 MAX_INBOX_LEN = 20
-NUM_NODES = 10
-NUM_NEIGHBOURS = 4
+NUM_NODES = 4
+NUM_NEIGHBOURS = 3
 MANA = np.ones(NUM_NODES) # Assume Mana is global
     
 def main():
@@ -37,6 +37,7 @@ def main():
     Tips = np.zeros((TimeSteps, NUM_NODES))
     QLen = np.zeros((TimeSteps, NUM_NODES))
     Lmds = np.zeros((TimeSteps, NUM_NODES))
+    Sim = np.zeros(TimeSteps)
     
     """
     Run simulation for the specified time
@@ -51,13 +52,15 @@ def main():
         for Node in Net.Nodes:
             Tips[i, Node.NodeID] = len(Node.TipsSet)
             QLen[i, Node.NodeID] = len(Node.Inbox)
-            Lmds[i, Node.NodeID] = Node.Lambdas[0]
+            Lmds[i, Node.NodeID] = Net.Nodes[0].Lambdas[Node.NodeID]
+        Sim[i] = Net.node_similartiy()
     
     """
     Plot results
     """
     plt.close('all')
-    fig, ax = plt.subplots(3, 1)
+    fig, ax = plt.subplots(4, 1)
+    
     for Node in Net.Nodes:
         ax[0].plot(np.arange(0, TimeSteps*STEP, STEP), Tips[:,Node.NodeID])
     ax[0].set_xlabel('Time')
@@ -72,10 +75,15 @@ def main():
         ax[2].plot(np.arange(0, TimeSteps*STEP, STEP), Lmds[:,Node.NodeID])
     ax[2].set_xlabel('Time')
     ax[2].set_ylabel('Lambda')
+    
+    ax[3].plot(np.arange(0, TimeSteps*STEP, STEP), Sim)
+    ax[3].set_xlabel('Time')
+    ax[3].set_ylabel('Sigma')
+    
     plt.show()
     plt.figure()
     pos = nx.spring_layout(G)
-    nx.draw(G, pos)
+    nx.draw(G, pos, width=2)
     plt.show()
 
 
@@ -228,13 +236,13 @@ class Node:
             
     def aimd_update(self, Time):
         """
-        Additively increase of multiplicatively decrease lambda
+        Additively increase or multiplicatively decrease lambda
         """
         for i in range(len(self.Neighbours)+1):
             if self.LastBackOff[i]:
                 if Time < self.LastBackOff[i] + WAIT_TIME:
                     self.BackOff[i] = False
-                    break
+                    continue
             if i==0:
                 Alpha = self.Alpha
             else:
@@ -383,6 +391,14 @@ class Network:
         for CCs in self.CommChannels:
             for CC in CCs:
                 CC.transmit_packets(Time)
+                
+    def node_similartiy(self):
+        D = np.identity(NUM_NODES)
+        for i, iNode in enumerate(self.Nodes):
+            for j, jNode in enumerate(self.Nodes):
+                D[i][j] = len(set(iNode.Tangle) & set(jNode.Tangle))/len(set(iNode.Tangle) | set(jNode.Tangle))
+        sigma = (1/(NUM_NODES*(NUM_NODES-1)))*(np.linalg.norm(D)-NUM_NODES)
+        return sigma
 
 if __name__ == "__main__":
         main()
