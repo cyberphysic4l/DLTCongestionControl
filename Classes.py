@@ -15,9 +15,13 @@ SIM_TIME = 600
 STEP = 0.1
 WAIT_TIME = 5
 MAX_INBOX_LEN = 20
-NUM_NODES = 5
+NUM_NODES = 10
 NUM_NEIGHBOURS = 4
-MANA = np.ones(NUM_NODES) # Assume Mana is global
+# global params
+MANA = np.ones(NUM_NODES) 
+ALPHA = 1
+BETA = 0.7
+MANA[0] = 2
     
 def main():
     """
@@ -31,20 +35,17 @@ def main():
     AdjMatrix = np.multiply(1*np.asarray(nx.to_numpy_matrix(G)), ChannelDelays)
     # Node parameters
     Lambdas = 0.1*(np.ones(NUM_NODES))
-    Nus = 10*(np.ones(NUM_NODES))
-    Alphas = 0.01*(np.ones(NUM_NODES))
-    Betas = 0.7*(np.ones(NUM_NODES))
+    Nus = 20*(np.ones(NUM_NODES))
     
     # Initialise output arrays
     Tips = np.zeros((TimeSteps, NUM_NODES))
     QLen = np.zeros((TimeSteps, NUM_NODES))
     Lmds = np.zeros((TimeSteps, NUM_NODES))
-    #Sim = np.zeros((TimeSteps, NUM_NODES))
     
     """
     Run simulation for the specified time
     """
-    Net = Network(AdjMatrix, Lambdas, Nus, Alphas, Betas)
+    Net = Network(AdjMatrix, Lambdas, Nus)
     for i in range(TimeSteps):
         # discrete time step size specified by global variable STEP
         T = STEP*i
@@ -105,7 +106,7 @@ class Node:
     """
     Object to simulate an IOTA full node
     """
-    def __init__(self, Network, Lambdas, Nu, Alpha, Beta, NodeID, Genesis, PoWDelay = 1):
+    def __init__(self, Network, Lambdas, Nu, NodeID, Genesis, PoWDelay = 1):
         self.TipsSet = [Genesis]
         self.Tangle = [Genesis]
         self.TempTransactions = []
@@ -116,13 +117,10 @@ class Node:
         self.Outboxes = []
         self.Lambdas = [Lambdas]
         self.Nu = Nu
-        self.Alpha = Alpha
-        self.Beta = Beta
         self.NodeID = NodeID
         self.BackOff = [[]]
         self.LastBackOff = [[]]
         self.LastCongestion = []
-        self.CongNotifs = []
         
     def generate_txs(self, Time):
         """
@@ -159,27 +157,34 @@ class Node:
         """
         # first, sort the inbox by the time the TXs arrived there (FIFO)
         self.Inbox.sort(key=lambda p: p.EndTime)
-        # process according to rate Nu
-        ProcessedTXs = np.sort(np.random.uniform(Time, Time+STEP, np.random.poisson(STEP*self.Nu)))
-        for i, t in enumerate(ProcessedTXs):
-            if i >= len(self.Inbox):
-                break
-            self.Tangle.append(self.Inbox[i].Data)
-            if not self.Inbox[i].Data.Children:
-                self.TipsSet.append(self.Inbox[i].Data)
-            if self.Inbox[i].Data.Parents:
-                for Parent in self.Inbox[i].Data.Parents:
-                    Parent.Children.append(self.Inbox[i].Data)
-                    if Parent in self.TipsSet:
-                        self.TipsSet.remove(Parent)
+        # process according to global rate Nu
+        nTX = np.random.poisson(STEP*self.Nu)
+        i = 0
+        while i < nTX:
+            if self.Inbox:
+                if self.Inbox[0].Data not in self.Tangle:
+                    self.Tangle.append(self.Inbox[0].Data)
+                    if not self.Inbox[0].Data.Children:
+                        self.TipsSet.append(self.Inbox[0].Data)
+                    if self.Inbox[0].Data.Parents:
+                        for Parent in self.Inbox[0].Data.Parents:
+                            Parent.Children.append(self.Inbox[0].Data)
+                            if Parent in self.TipsSet:
+                                self.TipsSet.remove(Parent)
+                            else:
+                                continue
                     else:
-                        continue
+                        pass
+                    # add these processed TXs to outbox
+                    for Outbox in self.Outboxes:
+                        Outbox.append(self.Inbox[0].Data)
+                    del self.Inbox[0]
+                    i += 1
+                else:
+                    del self.Inbox[0]
             else:
-                pass
-            # add these processed TXs to outbox
-            for Outbox in self.Outboxes:
-                Outbox.append(self.Inbox[i].Data)
-            del self.Inbox[i]
+                break
+                
             
     def process_outboxes(self, Time):
         """
@@ -219,18 +224,14 @@ class Node:
                 self.BackOff[0] = True
             else:
                 RxNode = self.Neighbours[randIndex-1]
-                CongNotif = CongestionNotification(self.NodeID, RxNode.NodeID, Time)
-                self.Network.send_data(self, RxNode, CongNotif, Time)
+                self.Network.send_data(self, RxNode, 'back off', Time)
             
     def process_cong_notif(self, Packet, Time):
         """
         Process a received congestion notification
         """
-        CongNotif = Packet.Data
-        if CongNotif not in self.CongNotifs:
-            self.CongNotifs.append(CongNotif)
-            index = self.Neighbours.index(Packet.TxNode)
-            self.BackOff[index] = True
+        index = self.Neighbours.index(Packet.TxNode)
+        self.BackOff[index] = True
             
     def aimd_update(self, Time):
         """
@@ -242,11 +243,11 @@ class Node:
                     self.BackOff[i] = False
                     continue
             if i==0: # for self
-                Alpha = self.Alpha
+                Alpha = ALPHA*MANA[self.NodeID]/sum(MANA)
             else: # for neighbours
-                Alpha = self.Alpha*NUM_NODES
+                Alpha = ALPHA
             if self.BackOff[i]:
-                self.Lambdas[i] = self.Lambdas[i]*self.Beta
+                self.Lambdas[i] = self.Lambdas[i]*BETA
                 self.LastBackOff[i] = Time
             else:
                 self.Lambdas[i] += Alpha*STEP
@@ -256,26 +257,8 @@ class Node:
         """
         Add to inbox if not already received and/or processed
         """
-        Tran = Packet.Data
-        # check TX is not already in the inbox in different packet
-        for p in self.Inbox:
-            if p.Data == Tran:
-                if Packet.EndTime < p.EndTime:
-                    self.Inbox.remove(p)
-                    self.Inbox.append(Packet)
-                return
-        # check TX is not already in this node's Tangle
-        if Tran not in self.Tangle:
-            self.Inbox.append(Packet)
+        self.Inbox.append(Packet)
         
-class CongestionNotification:
-    """
-    Object for data to be sent to tell nodes to back off etc
-    """
-    def __init__(self, TxNodeID, RxNodeID, CongTime):
-        self.TxNodeID = TxNodeID
-        self.RxNodeID = RxNodeID
-        self.CongTime = CongTime
 
 class Packet:
     """
@@ -329,7 +312,7 @@ class CommChannel:
         if isinstance(Packet.Data, Transaction):
             # if this is a transaction, add the Packet to Inbox
             self.RxNode.add_to_inbox(Packet)
-        elif isinstance(Packet.Data, CongestionNotification): 
+        else: 
             # else this is a back off notification
             self.RxNode.process_cong_notif(Packet, Time)
         self.Packets.remove(Packet)
@@ -338,7 +321,7 @@ class Network:
     """
     Object containing all nodes and their interconnections
     """
-    def __init__(self, AdjMatrix, Lambdas, Nus, Alphas, Betas):
+    def __init__(self, AdjMatrix, Lambdas, Nus):
         self.A = AdjMatrix
         self.Lambdas = Lambdas
         self.Nodes = []
@@ -346,7 +329,7 @@ class Network:
         Genesis = Transaction(0, [], [])
         # Create nodes
         for i in range(np.size(self.A,1)):
-            self.Nodes.append(Node(self, Lambdas[i], Nus[i], Alphas[i], Betas[i], i, Genesis))
+            self.Nodes.append(Node(self, Lambdas[i], Nus[i], i, Genesis))
         # Add neighbours and create list of comm channels corresponding to each node
         for i in range(np.size(self.A,1)):
             RowList = []
@@ -389,15 +372,7 @@ class Network:
         for CCs in self.CommChannels:
             for CC in CCs:
                 CC.transmit_packets(Time)
-    """     
-    def node_similartiy(self):
-        D = np.identity(NUM_NODES)
-        for i, iNode in enumerate(self.Nodes):
-            for j, jNode in enumerate(self.Nodes):
-                D[i][j] = len(set(iNode.Tangle) - set(jNode.Tangle)) + len(set(jNode.Tangle) - set(iNode.Tangle))
-        sigma = (1/(NUM_NODES*(NUM_NODES-1)))*(np.linalg.norm(D, axis=1)-NUM_NODES)
-        return sigma
-    """
+                
 if __name__ == "__main__":
         main()
         
