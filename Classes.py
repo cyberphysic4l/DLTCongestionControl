@@ -15,13 +15,13 @@ SIM_TIME = 600
 STEP = 0.1
 WAIT_TIME = 5
 MAX_INBOX_LEN = 20
-NUM_NODES = 10
+NUM_NODES = 8
 NUM_NEIGHBOURS = 4
 # global params
 MANA = np.ones(NUM_NODES) 
 ALPHA = 1
 BETA = 0.7
-MANA[0] = 2
+NU = 10
     
 def main():
     """
@@ -35,13 +35,18 @@ def main():
     AdjMatrix = np.multiply(1*np.asarray(nx.to_numpy_matrix(G)), ChannelDelays)
     # Node parameters
     Lambdas = 0.1*(np.ones(NUM_NODES))
-    Nus = 20*(np.ones(NUM_NODES))
+    Nus = NU*(np.ones(NUM_NODES))
     
     # Initialise output arrays
     Tips = np.zeros((TimeSteps, NUM_NODES))
     QLen = np.zeros((TimeSteps, NUM_NODES))
-    Lmds = np.zeros((TimeSteps, NUM_NODES))
-    
+    Lmds = [np.zeros((TimeSteps, NUM_NODES))]
+    for i in range(NUM_NEIGHBOURS):
+        Lmds.append(np.zeros((TimeSteps, NUM_NODES)))
+    OBs = [np.zeros((TimeSteps, NUM_NODES))]
+    for i in range(NUM_NEIGHBOURS-1):
+        OBs.append(np.zeros((TimeSteps, NUM_NODES)))
+    AvgSymDiffs = np.zeros((TimeSteps, NUM_NODES))
     """
     Run simulation for the specified time
     """
@@ -49,35 +54,62 @@ def main():
     for i in range(TimeSteps):
         # discrete time step size specified by global variable STEP
         T = STEP*i
+        if (T>500):
+            for Node in Net.Nodes:
+                Node.Lambdas[0] = 0
         # update network for all new events in this time step
         Net.simulate(T)
         # save summary results in output arrays
         for Node in Net.Nodes:
             Tips[i, Node.NodeID] = len(Node.TipsSet)
             QLen[i, Node.NodeID] = len(Node.Inbox)
-            Lmds[i, Node.NodeID] = Node.Lambdas[0]
-    print(np.average(Lmds, axis=0))
+            Lmds[0][i, Node.NodeID] = Node.Lambdas[0]
+            for j, Neighbour in enumerate(Node.Neighbours):
+                Lmds[j+1][i, Node.NodeID] = Node.Lambdas[j+1]
+            for j, Neighbour in enumerate(Node.Neighbours):
+                OBs[j][i, Node.NodeID] = len(Node.Outboxes[j])
+        AvgSymDiffs[i,:] = np.average(Net.sym_diffs(), axis=0)
+    print(np.average(Lmds[0], axis=0))
     
     """
     Plot results
     """
     plt.close('all')
-    fig, ax = plt.subplots(3, 1)
+    fig, ax1 = plt.subplots(4, 1)
+    
+    for i, Node in enumerate(Net.Nodes):
+        ax1[0].plot(np.arange(0, TimeSteps*STEP, STEP), AvgSymDiffs[:,Node.NodeID], color=colors[i])
+    ax1[0].set_xlabel('Time')
+    ax1[0].set_ylabel('Avg Symmetric Diff')
+    ax1[0].legend(list(map(str, range(NUM_NODES))))
     
     for Node in Net.Nodes:
-        ax[0].plot(np.arange(0, TimeSteps*STEP, STEP), Tips[:,Node.NodeID])
-    ax[0].set_xlabel('Time')
-    ax[0].set_ylabel('Number of Tips')
+        ax1[1].plot(np.arange(0, TimeSteps*STEP, STEP), Tips[:,Node.NodeID])
+    ax1[1].set_xlabel('Time')
+    ax1[1].set_ylabel('Number of Tips')
+    ax1[1].legend(list(map(str, range(NUM_NODES))))
     
     for Node in Net.Nodes:
-        ax[1].plot(np.arange(0, TimeSteps*STEP, STEP), QLen[:,Node.NodeID])
-    ax[1].set_xlabel('Time')
-    ax[1].set_ylabel('Inbox Length')
+        ax1[2].plot(np.arange(0, TimeSteps*STEP, STEP), QLen[:,Node.NodeID])
+    ax1[2].set_xlabel('Time')
+    ax1[2].set_ylabel('Inbox Length')
+    ax1[2].legend(list(map(str, range(NUM_NODES))))
     
     for Node in Net.Nodes:
-        ax[2].plot(np.arange(0, TimeSteps*STEP, STEP), Lmds[:,Node.NodeID])
-    ax[2].set_xlabel('Time')
-    ax[2].set_ylabel('Lambda')
+        ax1[3].plot(np.arange(0, TimeSteps*STEP, STEP), Lmds[0][:,Node.NodeID])
+    ax1[3].set_xlabel('Time')
+    ax1[3].set_ylabel('Lambda')
+    ax1[3].legend(list(map(str, range(NUM_NODES))))
+    
+    fig2, ax2 = plt.subplots(NUM_NODES, 1)
+    for i, Node in enumerate(Net.Nodes):
+        for j, Neighbour in enumerate(Node.Neighbours):
+            ax2[i].plot(np.arange(0, TimeSteps*STEP, STEP), Lmds[j+1][:,Node.NodeID], color=colors[Neighbour.NodeID])
+    
+    fig3, ax3 = plt.subplots(NUM_NODES, 1)
+    for i, Node in enumerate(Net.Nodes):
+        for j, Neighbour in enumerate(Node.Neighbours):
+            ax3[i].plot(np.arange(0, TimeSteps*STEP, STEP), OBs[j][:,Node.NodeID], color=colors[Neighbour.NodeID])
     
     plt.show()
     plt.figure()
@@ -213,7 +245,7 @@ class Node:
             for Packet in self.Inbox:
                 IssuingNodeID = Packet.Data.NodeID
                 if Packet.TxNode == self:
-                    NodeTrans[0] += 1/MANA[IssuingNodeID]
+                    NodeTrans[0] += 100/MANA[IssuingNodeID]
                 else:
                     index = self.Neighbours.index(Packet.TxNode)+1
                     NodeTrans[index] += 1/MANA[IssuingNodeID]
@@ -230,7 +262,7 @@ class Node:
         """
         Process a received congestion notification
         """
-        index = self.Neighbours.index(Packet.TxNode)
+        index = self.Neighbours.index(Packet.TxNode)+1
         self.BackOff[index] = True
             
     def aimd_update(self, Time):
@@ -372,6 +404,15 @@ class Network:
         for CCs in self.CommChannels:
             for CC in CCs:
                 CC.transmit_packets(Time)
+    
+    def sym_diffs(self):
+        SymDiffs = np.zeros((NUM_NODES, NUM_NODES))
+        for i, iNode in enumerate(self.Nodes):
+            for j, jNode in enumerate(self.Nodes):
+                if j>i:
+                    SymDiffs[i][j] = len(set(iNode.Tangle).symmetric_difference(set(jNode.Tangle)))
+        return SymDiffs + np.transpose(SymDiffs)
+            
                 
 if __name__ == "__main__":
         main()
