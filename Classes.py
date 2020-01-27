@@ -14,14 +14,16 @@ colors = prop_cycle.by_key()['color']
 SIM_TIME = 600
 STEP = 0.1
 WAIT_TIME = 5
-MAX_INBOX_LEN = 20
-NUM_NODES = 8
+MAX_INBOX_LEN = 40
+NUM_NODES = 6
 NUM_NEIGHBOURS = 4
 # global params
-MANA = np.ones(NUM_NODES) 
-ALPHA = 1
-BETA = 0.7
+MANA = np.ones(NUM_NODES)
+MANA[0] = 5
+ALPHA = 0.1
+BETA = 0.8
 NU = 10
+np.random.seed(0)
     
 def main():
     """
@@ -40,12 +42,7 @@ def main():
     # Initialise output arrays
     Tips = np.zeros((TimeSteps, NUM_NODES))
     QLen = np.zeros((TimeSteps, NUM_NODES))
-    Lmds = [np.zeros((TimeSteps, NUM_NODES))]
-    for i in range(NUM_NEIGHBOURS):
-        Lmds.append(np.zeros((TimeSteps, NUM_NODES)))
-    OBs = [np.zeros((TimeSteps, NUM_NODES))]
-    for i in range(NUM_NEIGHBOURS-1):
-        OBs.append(np.zeros((TimeSteps, NUM_NODES)))
+    Lmds = np.zeros((TimeSteps, NUM_NODES))
     AvgSymDiffs = np.zeros((TimeSteps, NUM_NODES))
     """
     Run simulation for the specified time
@@ -54,28 +51,29 @@ def main():
     for i in range(TimeSteps):
         # discrete time step size specified by global variable STEP
         T = STEP*i
+        """
+        if (T>200):
+            Net.Nodes[0].Lambda = 0.5
+            Net.Nodes[1].Lambda = 0.5
         if (T>500):
             for Node in Net.Nodes:
-                Node.Lambdas[0] = 0
+                Node.Lambda = 0
+        """
         # update network for all new events in this time step
         Net.simulate(T)
         # save summary results in output arrays
         for Node in Net.Nodes:
             Tips[i, Node.NodeID] = len(Node.TipsSet)
             QLen[i, Node.NodeID] = len(Node.Inbox)
-            Lmds[0][i, Node.NodeID] = Node.Lambdas[0]
-            for j, Neighbour in enumerate(Node.Neighbours):
-                Lmds[j+1][i, Node.NodeID] = Node.Lambdas[j+1]
-            for j, Neighbour in enumerate(Node.Neighbours):
-                OBs[j][i, Node.NodeID] = len(Node.Outboxes[j])
+            Lmds[i, Node.NodeID] = Node.Lambda
         AvgSymDiffs[i,:] = np.average(Net.sym_diffs(), axis=0)
-    print(np.average(Lmds[0], axis=0))
+    print(np.average(Lmds, axis=0))
     
     """
     Plot results
     """
     plt.close('all')
-    fig, ax1 = plt.subplots(4, 1)
+    fig, ax1 = plt.subplots(5, 1)
     
     for i, Node in enumerate(Net.Nodes):
         ax1[0].plot(np.arange(0, TimeSteps*STEP, STEP), AvgSymDiffs[:,Node.NodeID], color=colors[i])
@@ -95,21 +93,18 @@ def main():
     ax1[2].set_ylabel('Inbox Length')
     ax1[2].legend(list(map(str, range(NUM_NODES))))
     
-    for Node in Net.Nodes:
-        ax1[3].plot(np.arange(0, TimeSteps*STEP, STEP), Lmds[0][:,Node.NodeID])
+    for i, Node in enumerate(Net.Nodes):
+        ax1[3].plot(np.arange(0, TimeSteps*STEP, STEP), Lmds[:,Node.NodeID], color=colors[i])
     ax1[3].set_xlabel('Time')
     ax1[3].set_ylabel('Lambda')
     ax1[3].legend(list(map(str, range(NUM_NODES))))
     
-    fig2, ax2 = plt.subplots(NUM_NODES, 1)
     for i, Node in enumerate(Net.Nodes):
-        for j, Neighbour in enumerate(Node.Neighbours):
-            ax2[i].plot(np.arange(0, TimeSteps*STEP, STEP), Lmds[j+1][:,Node.NodeID], color=colors[Neighbour.NodeID])
-    
-    fig3, ax3 = plt.subplots(NUM_NODES, 1)
-    for i, Node in enumerate(Net.Nodes):
-        for j, Neighbour in enumerate(Node.Neighbours):
-            ax3[i].plot(np.arange(0, TimeSteps*STEP, STEP), OBs[j][:,Node.NodeID], color=colors[Neighbour.NodeID])
+        movavg = np.convolve(Lmds[:,Node.NodeID], np.ones((500,))/500, mode='valid')
+        ax1[4].plot(np.arange(0, len(movavg)*STEP, STEP), movavg, '--', color=colors[i])
+    ax1[4].set_xlabel('Time')
+    ax1[4].set_ylabel('Lambda  (Moving Average)')
+    ax1[4].legend(list(map(str, range(NUM_NODES))))
     
     plt.show()
     plt.figure()
@@ -138,7 +133,7 @@ class Node:
     """
     Object to simulate an IOTA full node
     """
-    def __init__(self, Network, Lambdas, Nu, NodeID, Genesis, PoWDelay = 1):
+    def __init__(self, Network, Lambda, Nu, NodeID, Genesis, PoWDelay = 1):
         self.TipsSet = [Genesis]
         self.Tangle = [Genesis]
         self.TempTransactions = []
@@ -146,19 +141,22 @@ class Node:
         self.Neighbours = []
         self.Network = Network
         self.Inbox = []
-        self.Outboxes = []
-        self.Lambdas = [Lambdas]
+        self.InboxTrans = []
+        self.FilteredInbox = []
+        self.Lambda = Lambda
         self.Nu = Nu
         self.NodeID = NodeID
-        self.BackOff = [[]]
-        self.LastBackOff = [[]]
+        self.Alpha = ALPHA*MANA[self.NodeID]/sum(MANA)
+        self.BackOff = []
+        self.LastBackOff = []
         self.LastCongestion = []
+        self.CongNotifRx = False
         
     def generate_txs(self, Time):
         """
         Create new TXs at rate lambda and do PoW
         """
-        NewTXs = np.sort(np.random.uniform(Time, Time+STEP, np.random.poisson(STEP*self.Lambdas[0])))
+        NewTXs = np.sort(np.random.uniform(Time, Time+STEP, np.random.poisson(STEP*self.Lambda)))
         for t in NewTXs:
             Parents = self.select_tips(2)
             self.TempTransactions.append(Transaction(t, Parents, self.NodeID))
@@ -189,8 +187,10 @@ class Node:
         """
         # first, sort the inbox by the time the TXs arrived there (FIFO)
         self.Inbox.sort(key=lambda p: p.EndTime)
+                    
         # process according to global rate Nu
         nTX = np.random.poisson(STEP*self.Nu)
+        times = np.sort(np.random.uniform(Time, Time+STEP, nTX))
         i = 0
         while i < nTX:
             if self.Inbox:
@@ -205,91 +205,76 @@ class Node:
                                 self.TipsSet.remove(Parent)
                             else:
                                 continue
-                    else:
-                        pass
-                    # add these processed TXs to outbox
-                    for Outbox in self.Outboxes:
-                        Outbox.append(self.Inbox[0].Data)
+                    # send these to all neighbours
+                    self.Network.broadcast_data(self, self.Inbox[0].Data, times[i])
                     del self.Inbox[0]
                     i += 1
                 else:
                     del self.Inbox[0]
             else:
                 break
-                
-            
-    def process_outboxes(self, Time):
-        """
-        Process TXs in outbox corresponding to each neighbour
-        """
-        for i, Outbox in enumerate(self.Outboxes):
-            nTX = np.random.poisson(STEP*self.Lambdas[i+1])
-            ProcessedTXs = np.sort(np.random.uniform(Time, Time+STEP, nTX))
-            for t in ProcessedTXs:
-                if Outbox:
-                    self.Network.send_data(self, self.Neighbours[i], Outbox[0], t)
-                    del Outbox[0]
-                else:
-                    break
     
     def check_congestion(self, Time):
         """
         Check if congestion is occuring and send back-offs
         """
-        if len(self.Inbox) > MAX_INBOX_LEN:
+        if (len(self.Inbox) > MAX_INBOX_LEN):
             if self.LastCongestion:
                 if Time < self.LastCongestion + WAIT_TIME:
                     return
-            # count number of TXs from each neighbour (and self) in the inbox
-            NodeTrans = np.zeros(len(self.Neighbours)+1)
-            for Packet in self.Inbox:
-                IssuingNodeID = Packet.Data.NodeID
-                if Packet.TxNode == self:
-                    NodeTrans[0] += 100/MANA[IssuingNodeID]
-                else:
-                    index = self.Neighbours.index(Packet.TxNode)+1
-                    NodeTrans[index] += 1/MANA[IssuingNodeID]
-            # Probability of backing off
-            Probs = (NodeTrans)/sum(NodeTrans)
-            randIndex = np.random.choice(range(len(Probs)), p=Probs)
-            if randIndex == 0: # this node itself must back off
-                self.BackOff[0] = True
-            else:
-                RxNode = self.Neighbours[randIndex-1]
-                self.Network.send_data(self, RxNode, 'back off', Time)
+            self.back_off(Time)
+            
+    def back_off(self, Time):
+        self.LastCongestion = Time
+        # always back off if the 
+        if self.Lambda > NU*MANA[self.NodeID]/sum(MANA):
+            self.BackOff = True
+            return
+        # count number of TXs from each neighbour (and self) in the inbox
+        NodeTrans = np.zeros(len(self.Neighbours))
+        for Packet in self.FilteredInbox:
+            IssuingNodeID = Packet.Data.NodeID
+            if self.Network.Nodes[IssuingNodeID] in self.Neighbours:
+                index = self.Neighbours.index(self.Network.Nodes[IssuingNodeID])
+                NodeTrans[index] += 1/MANA[IssuingNodeID]
+        # Probability of backing off
+        Probs = (NodeTrans)/sum(NodeTrans)
+        randIndex = np.random.choice(range(len(Probs)), p=Probs)
+        self.Network.send_data(self, self.Neighbours[randIndex], 'back off', Time)
             
     def process_cong_notif(self, Packet, Time):
         """
         Process a received congestion notification
         """
-        index = self.Neighbours.index(Packet.TxNode)+1
-        self.BackOff[index] = True
-            
+        if self.LastCongestion:
+            if Time < self.LastCongestion + WAIT_TIME:
+                    return
+        self.back_off(Time)
+        
     def aimd_update(self, Time):
         """
         Additively increase or multiplicatively decrease lambda
         """
-        for i in range(len(self.Neighbours)+1):
-            if self.LastBackOff[i]:
-                if Time < self.LastBackOff[i] + WAIT_TIME:
-                    self.BackOff[i] = False
-                    continue
-            if i==0: # for self
-                Alpha = ALPHA*MANA[self.NodeID]/sum(MANA)
-            else: # for neighbours
-                Alpha = ALPHA
-            if self.BackOff[i]:
-                self.Lambdas[i] = self.Lambdas[i]*BETA
-                self.LastBackOff[i] = Time
-            else:
-                self.Lambdas[i] += Alpha*STEP
+        if self.LastBackOff:
+            if Time < self.LastBackOff + WAIT_TIME:
+                self.BackOff = False
+                return
+        if self.BackOff:
+            self.Lambda = self.Lambda*BETA
+            self.LastBackOff = Time
+        else:
+            self.Lambda += self.Alpha*STEP
             
-                
     def add_to_inbox(self, Packet):
         """
         Add to inbox if not already received and/or processed
         """
+        if Packet.Data not in self.InboxTrans:
+            if Packet.Data not in self.Tangle:
+                self.FilteredInbox.append(Packet)
         self.Inbox.append(Packet)
+        self.InboxTrans.append(Packet.Data)
+        
         
 
 class Packet:
@@ -367,10 +352,6 @@ class Network:
             RowList = []
             for j in np.nditer(np.nonzero(self.A[i,:])):
                 self.Nodes[i].Neighbours.append(self.Nodes[j])
-                self.Nodes[i].Outboxes.append([]) # start with empty outbox for each neighbour
-                self.Nodes[i].Lambdas.append(NUM_NODES*Lambdas[i]) # start with lambda for each outbox
-                self.Nodes[i].BackOff.append([])
-                self.Nodes[i].LastBackOff.append([])
                 RowList.append(CommChannel(self.Nodes[i],self.Nodes[j],self.A[i][j]))
             self.CommChannels.append(RowList)
             
@@ -395,7 +376,6 @@ class Network:
         for Node in self.Nodes:
             Node.generate_txs(Time)
             Node.process_inbox(Time)
-            Node.process_outboxes(Time)
             Node.check_congestion(Time)
             Node.aimd_update(Time)
         """
@@ -404,6 +384,20 @@ class Network:
         for CCs in self.CommChannels:
             for CC in CCs:
                 CC.transmit_packets(Time)
+        """
+        nTxs = 0
+        nBOs = 0
+        for Packet in self.CommChannels[0][0].Packets:
+            if isinstance(Packet.Data, Transaction):
+                nTxs += 1
+            else:
+                nBOs += 1
+        
+        print(Time)
+        print('nTxs ' + str(nTxs))
+        print('nBOs ' + str(nBOs))
+        print()
+        """
     
     def sym_diffs(self):
         SymDiffs = np.zeros((NUM_NODES, NUM_NODES))
