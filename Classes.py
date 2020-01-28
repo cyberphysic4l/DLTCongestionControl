@@ -384,20 +384,6 @@ class Network:
         for CCs in self.CommChannels:
             for CC in CCs:
                 CC.transmit_packets(Time)
-        """
-        nTxs = 0
-        nBOs = 0
-        for Packet in self.CommChannels[0][0].Packets:
-            if isinstance(Packet.Data, Transaction):
-                nTxs += 1
-            else:
-                nBOs += 1
-        
-        print(Time)
-        print('nTxs ' + str(nTxs))
-        print('nBOs ' + str(nBOs))
-        print()
-        """
     
     def sym_diffs(self):
         SymDiffs = np.zeros((NUM_NODES, NUM_NODES))
