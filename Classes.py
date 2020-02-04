@@ -19,9 +19,8 @@ NUM_NODES = 6
 NUM_NEIGHBOURS = 4
 # global params
 MANA = np.ones(NUM_NODES)
-MANA[0] = 5
 ALPHA = 0.1
-BETA = 0.8
+BETA = 0.9
 NU = 10
 np.random.seed(0)
     
@@ -44,6 +43,7 @@ def main():
     QLen = np.zeros((TimeSteps, NUM_NODES))
     Lmds = np.zeros((TimeSteps, NUM_NODES))
     AvgSymDiffs = np.zeros((TimeSteps, NUM_NODES))
+    MaxSymDiff = np.zeros(TimeSteps)
     """
     Run simulation for the specified time
     """
@@ -51,14 +51,10 @@ def main():
     for i in range(TimeSteps):
         # discrete time step size specified by global variable STEP
         T = STEP*i
-        """
+        
         if (T>200):
-            Net.Nodes[0].Lambda = 0.5
-            Net.Nodes[1].Lambda = 0.5
-        if (T>500):
-            for Node in Net.Nodes:
-                Node.Lambda = 0
-        """
+            Net.Nodes[0].Lambda = 0
+            Net.Nodes[1].Lambda = 0
         # update network for all new events in this time step
         Net.simulate(T)
         # save summary results in output arrays
@@ -66,14 +62,16 @@ def main():
             Tips[i, Node.NodeID] = len(Node.TipsSet)
             QLen[i, Node.NodeID] = len(Node.Inbox)
             Lmds[i, Node.NodeID] = Node.Lambda
-        AvgSymDiffs[i,:] = np.average(Net.sym_diffs(), axis=0)
+        SymDiffs = Net.sym_diffs()
+        AvgSymDiffs[i,:] = np.average(SymDiffs, axis=0)
+        MaxSymDiff[i] = SymDiffs.max()
     print(np.average(Lmds, axis=0))
     
     """
     Plot results
     """
     plt.close('all')
-    fig, ax1 = plt.subplots(5, 1)
+    fig, ax1 = plt.subplots(4, 1)
     
     for i, Node in enumerate(Net.Nodes):
         ax1[0].plot(np.arange(0, TimeSteps*STEP, STEP), AvgSymDiffs[:,Node.NodeID], color=colors[i])
@@ -81,30 +79,42 @@ def main():
     ax1[0].set_ylabel('Avg Symmetric Diff')
     ax1[0].legend(list(map(str, range(NUM_NODES))))
     
-    for Node in Net.Nodes:
-        ax1[1].plot(np.arange(0, TimeSteps*STEP, STEP), Tips[:,Node.NodeID])
+    ax1[1].plot(np.arange(0, TimeSteps*STEP, STEP), MaxSymDiff)
     ax1[1].set_xlabel('Time')
-    ax1[1].set_ylabel('Number of Tips')
-    ax1[1].legend(list(map(str, range(NUM_NODES))))
+    ax1[1].set_ylabel('Max Symmetric Diff')
     
     for Node in Net.Nodes:
-        ax1[2].plot(np.arange(0, TimeSteps*STEP, STEP), QLen[:,Node.NodeID])
+        ax1[2].plot(np.arange(0, TimeSteps*STEP, STEP), Tips[:,Node.NodeID])
     ax1[2].set_xlabel('Time')
-    ax1[2].set_ylabel('Inbox Length')
+    ax1[2].set_ylabel('Number of Tips')
     ax1[2].legend(list(map(str, range(NUM_NODES))))
     
-    for i, Node in enumerate(Net.Nodes):
-        ax1[3].plot(np.arange(0, TimeSteps*STEP, STEP), Lmds[:,Node.NodeID], color=colors[i])
+    for Node in Net.Nodes:
+        ax1[3].plot(np.arange(0, TimeSteps*STEP, STEP), QLen[:,Node.NodeID])
     ax1[3].set_xlabel('Time')
-    ax1[3].set_ylabel('Lambda')
+    ax1[3].set_ylabel('Inbox Length')
     ax1[3].legend(list(map(str, range(NUM_NODES))))
+    
+    
+    fig, ax2 = plt.subplots(3, 1)
+    
+    for i, Node in enumerate(Net.Nodes):
+        ax2[0].plot(np.arange(0, TimeSteps*STEP, STEP), Lmds[:,Node.NodeID], color=colors[i])
+    ax2[0].set_xlabel('Time')
+    ax2[0].set_ylabel('Lambda')
+    ax2[0].legend(list(map(str, range(NUM_NODES))))
     
     for i, Node in enumerate(Net.Nodes):
         movavg = np.convolve(Lmds[:,Node.NodeID], np.ones((500,))/500, mode='valid')
-        ax1[4].plot(np.arange(0, len(movavg)*STEP, STEP), movavg, '--', color=colors[i])
-    ax1[4].set_xlabel('Time')
-    ax1[4].set_ylabel('Lambda  (Moving Average)')
-    ax1[4].legend(list(map(str, range(NUM_NODES))))
+        ax2[1].plot(np.arange(0, len(movavg)*STEP, STEP), movavg, '--', color=colors[i])
+    ax2[1].set_xlabel('Time')
+    ax2[1].set_ylabel('Lambda  (Moving Average)')
+    ax2[1].legend(list(map(str, range(NUM_NODES))))
+    
+    Utilisation = 100*np.sum(Lmds, axis=1)/NU
+    ax2[2].plot(np.arange(0, TimeSteps*STEP, STEP), Utilisation)
+    ax2[2].set_xlabel('Time')
+    ax2[2].set_ylabel('Utilisation (%)')
     
     plt.show()
     plt.figure()
@@ -216,31 +226,13 @@ class Node:
     
     def check_congestion(self, Time):
         """
-        Check if congestion is occuring and send back-offs
+        Check if congestion is occurring
         """
         if (len(self.Inbox) > MAX_INBOX_LEN):
             if self.LastCongestion:
                 if Time < self.LastCongestion + WAIT_TIME:
                     return
             self.back_off(Time)
-            
-    def back_off(self, Time):
-        self.LastCongestion = Time
-        # always back off if the 
-        if self.Lambda > NU*MANA[self.NodeID]/sum(MANA):
-            self.BackOff = True
-            return
-        # count number of TXs from each neighbour (and self) in the inbox
-        NodeTrans = np.zeros(len(self.Neighbours))
-        for Packet in self.FilteredInbox:
-            IssuingNodeID = Packet.Data.NodeID
-            if self.Network.Nodes[IssuingNodeID] in self.Neighbours:
-                index = self.Neighbours.index(self.Network.Nodes[IssuingNodeID])
-                NodeTrans[index] += 1/MANA[IssuingNodeID]
-        # Probability of backing off
-        Probs = (NodeTrans)/sum(NodeTrans)
-        randIndex = np.random.choice(range(len(Probs)), p=Probs)
-        self.Network.send_data(self, self.Neighbours[randIndex], 'back off', Time)
             
     def process_cong_notif(self, Packet, Time):
         """
@@ -250,6 +242,32 @@ class Node:
             if Time < self.LastCongestion + WAIT_TIME:
                     return
         self.back_off(Time)
+            
+    def back_off(self, Time):
+        self.LastCongestion = Time
+        # always back off if rate is above the allocated minimum
+        if self.Lambda > NU*MANA[self.NodeID]/sum(MANA):
+            self.BackOff = True
+            return
+        # count number of TXs from each neighbour (and self) in the inbox
+        NodeTrans = np.zeros(len(self.Neighbours)+1)
+        for Packet in self.FilteredInbox:
+            IssuingNodeID = Packet.Data.NodeID
+            if self.NodeID == IssuingNodeID:
+                NodeTrans[0] += 1/MANA[IssuingNodeID]
+            if self.Network.Nodes[IssuingNodeID] in self.Neighbours:
+                index = self.Neighbours.index(self.Network.Nodes[IssuingNodeID])
+                NodeTrans[index+1] += 1/MANA[IssuingNodeID]
+        
+        if self.Lambda < NU*MANA[self.NodeID]/sum(MANA):
+            NodeTrans[0] = 0 # never back off if already below allocated min
+        # Probability of backing off
+        Probs = (NodeTrans)/sum(NodeTrans)
+        randIndex = np.random.choice(range(len(Probs)), p=Probs)
+        if randIndex == 0:
+            self.BackOff = True
+        else:
+            self.Network.send_data(self, self.Neighbours[randIndex-1], 'back off', Time)
         
     def aimd_update(self, Time):
         """
