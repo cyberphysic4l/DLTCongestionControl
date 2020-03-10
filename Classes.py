@@ -1,80 +1,132 @@
 # -*- coding: utf-8 -*-
 """
 Created on Fri Sep 27 22:28:39 2019
-
-@author: Pietro Ferraro and Andrew Cullen
 """
 import numpy as np
 import matplotlib.pyplot as plt
 import networkx as nx
+from random import sample
+from pathlib import Path
 
-prop_cycle = plt.rcParams['axes.prop_cycle']
-colors = prop_cycle.by_key()['color']
-
+# Simulation Parameters
+MONTE_CARLOS = 100
 SIM_TIME = 600
 STEP = 0.1
-WAIT_TIME = 5
-MAX_INBOX_LEN = 40
-NUM_NODES = 6
-NUM_NEIGHBOURS = 4
-# global params
+# Network Parameters
+NU = 10
+NUM_NODES = 20
+NUM_NEIGHBOURS = 8
 MANA = np.ones(NUM_NODES)
+MANA[0] = 5
+MANA[1] = 5
+# AIMD Parameters
 ALPHA = 0.1
 BETA = 0.9
-NU = 10
-np.random.seed(0)
+WAIT_TIME = 5
+MAX_INBOX_LEN = WAIT_TIME*NU # length of inbox that would empty in WAIT_TIME
     
 def main():
     """
     Setup simulation inputs and instantiate output arrays
     """
+    # seed rng
+    np.random.seed(0)
+    
     TimeSteps = int(SIM_TIME/STEP)
     # Generate network topology
-    G = nx.random_regular_graph(NUM_NEIGHBOURS, NUM_NODES)
+    #G = nx.random_regular_graph(NUM_NEIGHBOURS, NUM_NODES)
+    G = nx.read_adjlist('result_adjlist.txt', delimiter=' ')
     # Get adjacency matrix and weight by delay at each channel
     ChannelDelays = 0.9*np.ones((NUM_NODES, NUM_NODES))+0.2*np.random.rand(NUM_NODES, NUM_NODES)
     AdjMatrix = np.multiply(1*np.asarray(nx.to_numpy_matrix(G)), ChannelDelays)
     # Node parameters
-    Lambdas = 0.1*(np.ones(NUM_NODES))
+    Lambdas = NU*MANA/sum(MANA)
     Nus = NU*(np.ones(NUM_NODES))
     
-    # Initialise output arrays
-    Tips = np.zeros((TimeSteps, NUM_NODES))
-    QLen = np.zeros((TimeSteps, NUM_NODES))
-    Lmds = np.zeros((TimeSteps, NUM_NODES))
-    AvgSymDiffs = np.zeros((TimeSteps, NUM_NODES))
-    MaxSymDiff = np.zeros(TimeSteps)
+    # Initialise plots
+    plt.close('all')
+    fig1, ax1 = plt.subplots()
+    fig2, ax2 = plt.subplots()
+    fig3, ax3 = plt.subplots()
+    fig4, ax4 = plt.subplots()
+    ax1.set_xlabel('Time')
+    ax1.set_ylabel('Lambda')
+    ax1.legend(list(map(str, range(NUM_NODES))))
+    ax2.set_xlabel('Time')
+    ax2.set_ylabel('Max Symmetric Difference')
+    ax3.set_xlabel('Time')
+    ax3.set_ylabel('Network Utilisation (%)')
+    ax4.set_xlabel('Time')
+    ax4.set_ylabel('Inbox Length')
     """
-    Run simulation for the specified time
+    Monte Carlo Sims
     """
-    Net = Network(AdjMatrix, Lambdas, Nus)
-    for i in range(TimeSteps):
-        # discrete time step size specified by global variable STEP
-        T = STEP*i
-        
-        if (T>200):
+    mcResults = [[],[],[],[]]
+    avgLatencies = np.zeros(MONTE_CARLOS)
+    varLatencies = np.zeros(MONTE_CARLOS)
+    for mc in range(MONTE_CARLOS):
+        print(mc)
+        Net = Network(AdjMatrix, Lambdas, Nus)
+        mcResults[0].append(np.zeros((TimeSteps, NUM_NODES)))
+        mcResults[1].append(np.zeros((TimeSteps, NUM_NODES)))
+        mcResults[2].append(np.zeros(TimeSteps))
+        for i in range(TimeSteps):
+            # discrete time step size specified by global variable STEP
+            T = STEP*i
+            # update network for all new events in this time step
             Net.Nodes[0].Lambda = 0
-            Net.Nodes[1].Lambda = 0
-        # update network for all new events in this time step
-        Net.simulate(T)
-        # save summary results in output arrays
-        for Node in Net.Nodes:
-            Tips[i, Node.NodeID] = len(Node.TipsSet)
-            QLen[i, Node.NodeID] = len(Node.Inbox)
-            Lmds[i, Node.NodeID] = Node.Lambda
-        SymDiffs = Net.sym_diffs()
-        AvgSymDiffs[i,:] = np.average(SymDiffs, axis=0)
-        MaxSymDiff[i] = SymDiffs.max()
-    print(np.average(Lmds, axis=0))
-    
+            Net.simulate(T)
+            # save summary results in output arrays
+            for Node in Net.Nodes:
+                mcResults[0][mc][i, Node.NodeID] = Node.Lambda
+                mcResults[1][mc][i, Node.NodeID] = len(Node.Inbox)
+            SymDiffs = Net.sym_diffs()
+            mcResults[2][mc][i] = SymDiffs.max()
+        latencies = Net.tran_latency()
+        avgLatencies[mc] = np.mean(latencies)
+        varLatencies[mc] = np.var(latencies)
+        del Net        
+        """ live plot
+        ax1.cla()
+        ax2.cla()
+        for i, Node in enumerate(Net.Nodes):
+            ax1.plot(np.arange(0, TimeSteps*STEP, STEP), avgLmds[:,Node.NodeID])
+        plt.pause(0.1)
+        ax2.plot(np.arange(0, TimeSteps*STEP, STEP), avgMSDs)
+        plt.pause(0.1)
+        plt.show()
+        """
+    # get results
+    avgLmds = sum(mcResults[0])/len(mcResults[0])
+    avgUtil = 100*np.sum(avgLmds, axis=1)/NU
+    avgInboxLen = sum(mcResults[1])/len(mcResults[1])
+    avgMSDs = sum(mcResults[2])/len(mcResults[2])
+    # create a directory for these results
+    dirstr = 'data/nu='+str(NU)+'/'+'alpha='+str(ALPHA)+'/'+'beta='+str(BETA)+'/'+'tau='+str(WAIT_TIME)+'/'+'inbox='+str(MAX_INBOX_LEN)+'/'+'nodes='+str(NUM_NODES)+'/'+'neighbours='+str(NUM_NEIGHBOURS)+'/'+'mana='+''.join(str(int(e)) for e in MANA)+'/'+'simtime='+str(SIM_TIME)+'/'+'nmc='+str(MONTE_CARLOS)
+    Path(dirstr).mkdir(parents=True, exist_ok=True)
+    # save results in this directory
+    np.savetxt(dirstr+'/avgMSDs.csv', avgMSDs, delimiter=',')
+    np.savetxt(dirstr+'/avgLmds.csv', avgLmds, delimiter=',')
+    np.savetxt(dirstr+'/avgUtil.csv', avgUtil, delimiter=',')
+    np.savetxt(dirstr+'/avgInboxLen.csv', avgInboxLen, delimiter=',')
+    np.savetxt(dirstr+'/avgLatencies.csv', avgLatencies, delimiter=',')
+    np.savetxt(dirstr+'/varLatencies.csv', varLatencies, delimiter=',')
+    # plot
+    ax1.cla()
+    ax2.cla()
+    for i in range(NUM_NODES):
+        ax1.plot(np.arange(0, TimeSteps*STEP, STEP), avgLmds[:,i])
+    ax2.plot(np.arange(0, TimeSteps*STEP, STEP), avgMSDs)
+    ax3.plot(np.arange(0, TimeSteps*STEP, STEP), avgUtil)
+    ax4.plot(np.arange(0, TimeSteps*STEP, STEP), avgInboxLen)
+    plt.show()
     """
     Plot results
     """
-    plt.close('all')
-    fig, ax1 = plt.subplots(4, 1)
     
+    """
     for i, Node in enumerate(Net.Nodes):
-        ax1[0].plot(np.arange(0, TimeSteps*STEP, STEP), AvgSymDiffs[:,Node.NodeID], color=colors[i])
+        ax1[0].plot(np.arange(0, TimeSteps*STEP, STEP), AvgSymDiffs[:,Node.NodeID])
     ax1[0].set_xlabel('Time')
     ax1[0].set_ylabel('Avg Symmetric Diff')
     ax1[0].legend(list(map(str, range(NUM_NODES))))
@@ -99,14 +151,14 @@ def main():
     fig, ax2 = plt.subplots(3, 1)
     
     for i, Node in enumerate(Net.Nodes):
-        ax2[0].plot(np.arange(0, TimeSteps*STEP, STEP), Lmds[:,Node.NodeID], color=colors[i])
+        ax2[0].plot(np.arange(0, TimeSteps*STEP, STEP), Lmds[:,Node.NodeID])
     ax2[0].set_xlabel('Time')
     ax2[0].set_ylabel('Lambda')
     ax2[0].legend(list(map(str, range(NUM_NODES))))
     
     for i, Node in enumerate(Net.Nodes):
         movavg = np.convolve(Lmds[:,Node.NodeID], np.ones((500,))/500, mode='valid')
-        ax2[1].plot(np.arange(0, len(movavg)*STEP, STEP), movavg, '--', color=colors[i])
+        ax2[1].plot(np.arange(0, len(movavg)*STEP, STEP), movavg, '--')
     ax2[1].set_xlabel('Time')
     ax2[1].set_ylabel('Lambda  (Moving Average)')
     ax2[1].legend(list(map(str, range(NUM_NODES))))
@@ -119,19 +171,27 @@ def main():
     plt.show()
     plt.figure()
     pos = nx.spring_layout(G)
-    nx.draw(G, pos, node_color=colors[0:NUM_NODES])
+    nx.draw(G, pos)#, node_color=colors[0:NUM_NODES])
     plt.show()
-
+    """
 
 class Transaction:
     """
     Object to simulate a transaction its edges in the DAG
     """
-    def __init__(self, ArrivalTime, Parents, NodeID):
+    def __init__(self, ArrivalTime, Parents, Node):
         self.ArrivalTime = ArrivalTime
         self.Children = []
         self.Parents = Parents
-        self.NodeID = NodeID # signature of issuing node
+        if Node:
+            self.NodeID = Node.NodeID # signature of issuing node
+            self.InformedNodes = [Node] # info about who has seen this TX
+            self.GlobalSolidTime = []
+        else: # genesis
+            self.NodeID = []
+            self.InformedNodes = [] 
+            self.GlobalSolidTime = []
+        
         
     def is_tip(self):
         if not self.Children:
@@ -168,8 +228,8 @@ class Node:
         """
         NewTXs = np.sort(np.random.uniform(Time, Time+STEP, np.random.poisson(STEP*self.Lambda)))
         for t in NewTXs:
-            Parents = self.select_tips(2)
-            self.TempTransactions.append(Transaction(t, Parents, self.NodeID))
+            Parents = self.select_tips()
+            self.TempTransactions.append(Transaction(t, Parents, self))
         # check PoW completion
         if self.TempTransactions:
             for Tran in self.TempTransactions:
@@ -181,14 +241,14 @@ class Node:
                     p.EndTime = t
                     self.add_to_inbox(p)
     
-    def select_tips(self, NumberOfSelections):
+    def select_tips(self):
         """
         Implements uniform random tip selection
         """
-        Selection = []
-        NumberOfTips= len(self.TipsSet)
-        for i in range(NumberOfSelections):
-            Selection.append(self.TipsSet[np.random.randint(NumberOfTips)])
+        if len(self.TipsSet)>1:
+            Selection = sample(self.TipsSet, 2)
+        else:
+            Selection = self.Tangle[-2:-1]
         return Selection
     
     def process_inbox(self, Time):
@@ -197,30 +257,32 @@ class Node:
         """
         # first, sort the inbox by the time the TXs arrived there (FIFO)
         self.Inbox.sort(key=lambda p: p.EndTime)
-                    
         # process according to global rate Nu
         nTX = np.random.poisson(STEP*self.Nu)
         times = np.sort(np.random.uniform(Time, Time+STEP, nTX))
         i = 0
         while i < nTX:
             if self.Inbox:
-                if self.Inbox[0].Data not in self.Tangle:
-                    self.Tangle.append(self.Inbox[0].Data)
-                    if not self.Inbox[0].Data.Children:
-                        self.TipsSet.append(self.Inbox[0].Data)
-                    if self.Inbox[0].Data.Parents:
-                        for Parent in self.Inbox[0].Data.Parents:
-                            Parent.Children.append(self.Inbox[0].Data)
+                Tran = self.Inbox[0].Data
+                if Tran not in self.Tangle:
+                    self.Tangle.append(Tran)
+                    # mark this TX as received by this node
+                    Tran.InformedNodes.append(self)
+                    if len(Tran.InformedNodes)==NUM_NODES:
+                        Tran.GlobalSolidTime = times[i]
+                    if not Tran.Children:
+                        self.TipsSet.append(Tran)
+                    if Tran.Parents:
+                        for Parent in Tran.Parents:
+                            Parent.Children.append(Tran)
                             if Parent in self.TipsSet:
                                 self.TipsSet.remove(Parent)
                             else:
                                 continue
                     # send these to all neighbours
-                    self.Network.broadcast_data(self, self.Inbox[0].Data, times[i])
-                    del self.Inbox[0]
+                    self.Network.broadcast_data(self, self.Inbox[0], times[i])
                     i += 1
-                else:
-                    del self.Inbox[0]
+                self.remove_from_inbox()
             else:
                 break
     
@@ -247,8 +309,10 @@ class Node:
         self.LastCongestion = Time
         # always back off if rate is above the allocated minimum
         if self.Lambda > NU*MANA[self.NodeID]/sum(MANA):
-            self.BackOff = True
-            return
+            # add coin toss
+            if np.random.random()>0.5:
+                self.BackOff = True
+                return
         # count number of TXs from each neighbour (and self) in the inbox
         NodeTrans = np.zeros(len(self.Neighbours)+1)
         for Packet in self.FilteredInbox:
@@ -258,25 +322,29 @@ class Node:
             if self.Network.Nodes[IssuingNodeID] in self.Neighbours:
                 index = self.Neighbours.index(self.Network.Nodes[IssuingNodeID])
                 NodeTrans[index+1] += 1/MANA[IssuingNodeID]
-        
+        """
         if self.Lambda < NU*MANA[self.NodeID]/sum(MANA):
             NodeTrans[0] = 0 # never back off if already below allocated min
+        """
         # Probability of backing off
-        Probs = (NodeTrans)/sum(NodeTrans)
-        randIndex = np.random.choice(range(len(Probs)), p=Probs)
-        if randIndex == 0:
-            self.BackOff = True
-        else:
-            self.Network.send_data(self, self.Neighbours[randIndex-1], 'back off', Time)
+        if sum(NodeTrans)>0:
+            Probs = (NodeTrans)/sum(NodeTrans)
+            randIndex = np.random.choice(range(len(Probs)), p=Probs)
+            if randIndex == 0:
+                self.BackOff = True
+            else:
+                self.Network.send_data(self, self.Neighbours[randIndex-1], 'back off', Time)
         
     def aimd_update(self, Time):
         """
         Additively increase or multiplicatively decrease lambda
         """
+        # if wait time has not passed---reset.
         if self.LastBackOff:
             if Time < self.LastBackOff + WAIT_TIME:
                 self.BackOff = False
                 return
+        # multiplicative decrease or else additive increase
         if self.BackOff:
             self.Lambda = self.Lambda*BETA
             self.LastBackOff = Time
@@ -293,7 +361,15 @@ class Node:
         self.Inbox.append(Packet)
         self.InboxTrans.append(Packet.Data)
         
-        
+    def remove_from_inbox(self):
+        """
+        Remove from Inbox and filtered inbox etc
+        """
+        if self.FilteredInbox:
+            if self.Inbox[0]==self.FilteredInbox[0]:
+                del self.FilteredInbox[0]
+        del self.Inbox[0]
+        del self.InboxTrans[0]
 
 class Packet:
     """
@@ -380,12 +456,16 @@ class Network:
         CC = self.CommChannels[TxNode.NodeID][TxNode.Neighbours.index(RxNode)]
         CC.send_packet(TxNode, RxNode, Data, Time)
             
-    def broadcast_data(self, TxNode, Data, Time):
+    def broadcast_data(self, TxNode, Packet, Time):
         """
         Send this data (TX or back off) to all neighbours
         """
         for i, CC in enumerate(self.CommChannels[self.Nodes.index(TxNode)]):
-            CC.send_packet(TxNode, TxNode.Neighbours[i], Data, Time)
+            # do not send to this node if it was received from this node
+            if isinstance(Packet.Data, Transaction):
+                if Packet.TxNode==TxNode.Neighbours[i]:
+                    continue
+            CC.send_packet(TxNode, TxNode.Neighbours[i], Packet.Data, Time)
         
     def simulate(self, Time):
         """
@@ -410,7 +490,13 @@ class Network:
                 if j>i:
                     SymDiffs[i][j] = len(set(iNode.Tangle).symmetric_difference(set(jNode.Tangle)))
         return SymDiffs + np.transpose(SymDiffs)
-            
+    
+    def tran_latency(self):
+        latencies = []
+        for Tran in self.Nodes[0].Tangle:
+            if Tran.GlobalSolidTime:
+                latencies.append(Tran.GlobalSolidTime-Tran.ArrivalTime)
+        return latencies
                 
 if __name__ == "__main__":
         main()
