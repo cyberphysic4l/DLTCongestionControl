@@ -14,28 +14,41 @@ SIM_TIME = 600
 STEP = 0.1
 # Network Parameters
 NU = 10
-NUM_NODES = 20
-NUM_NEIGHBOURS = 8
+NUM_NODES = 10
+NUM_NEIGHBOURS = 4
 MANA = np.ones(NUM_NODES)
 MANA[0] = 5
 MANA[1] = 5
 # AIMD Parameters
-ALPHA = 0.1
+ALPHA = 0.02*NU
 BETA = 0.9
 WAIT_TIME = 5
 MAX_INBOX_LEN = WAIT_TIME*NU # length of inbox that would empty in WAIT_TIME
     
 def main():
+    dirstr = 'data/nu='+str(NU)+'/'+'alpha='+str(ALPHA)+'/'+'beta='+str(BETA)+'/'+'tau='+str(WAIT_TIME)+'/'+'inbox='+str(MAX_INBOX_LEN)+'/'+'nodes='+str(NUM_NODES)+'/'+'neighbours='+str(NUM_NEIGHBOURS)+'/'+'mana='+''.join(str(int(e)) for e in MANA)+'/'+'simtime='+str(SIM_TIME)+'/'+'nmc='+str(MONTE_CARLOS)
+    if not Path(dirstr).exists():
+        print("Simulating")
+        simulate(dirstr)
+    else:
+        print("Simulation already done for these parameters")
+    
+    plot_results(dirstr)
+    
+def simulate(dirstr):
     """
     Setup simulation inputs and instantiate output arrays
     """
     # seed rng
     np.random.seed(0)
-    
     TimeSteps = int(SIM_TIME/STEP)
-    # Generate network topology
-    #G = nx.random_regular_graph(NUM_NEIGHBOURS, NUM_NODES)
-    G = nx.read_adjlist('result_adjlist.txt', delimiter=' ')
+    """
+    Generate network topology:
+    Comment out one of the below lines for either random k-regular graph or a
+    graph from an adjlist txt file i.e. from the autopeering simulator
+    """
+    G = nx.random_regular_graph(NUM_NEIGHBOURS, NUM_NODES)
+    #G = nx.read_adjlist('input_adjlist.txt', delimiter=' ')
     # Get adjacency matrix and weight by delay at each channel
     ChannelDelays = 0.9*np.ones((NUM_NODES, NUM_NODES))+0.2*np.random.rand(NUM_NODES, NUM_NODES)
     AdjMatrix = np.multiply(1*np.asarray(nx.to_numpy_matrix(G)), ChannelDelays)
@@ -43,27 +56,11 @@ def main():
     Lambdas = NU*MANA/sum(MANA)
     Nus = NU*(np.ones(NUM_NODES))
     
-    # Initialise plots
-    plt.close('all')
-    fig1, ax1 = plt.subplots()
-    fig2, ax2 = plt.subplots()
-    fig3, ax3 = plt.subplots()
-    fig4, ax4 = plt.subplots()
-    ax1.set_xlabel('Time')
-    ax1.set_ylabel('Lambda')
-    ax1.legend(list(map(str, range(NUM_NODES))))
-    ax2.set_xlabel('Time')
-    ax2.set_ylabel('Max Symmetric Difference')
-    ax3.set_xlabel('Time')
-    ax3.set_ylabel('Network Utilisation (%)')
-    ax4.set_xlabel('Time')
-    ax4.set_ylabel('Inbox Length')
     """
     Monte Carlo Sims
     """
     mcResults = [[],[],[],[]]
-    avgLatencies = np.zeros(MONTE_CARLOS)
-    varLatencies = np.zeros(MONTE_CARLOS)
+    latencies = []
     for mc in range(MONTE_CARLOS):
         print(mc)
         Net = Network(AdjMatrix, Lambdas, Nus)
@@ -82,98 +79,76 @@ def main():
                 mcResults[1][mc][i, Node.NodeID] = len(Node.Inbox)
             SymDiffs = Net.sym_diffs()
             mcResults[2][mc][i] = SymDiffs.max()
-        latencies = Net.tran_latency()
-        avgLatencies[mc] = np.mean(latencies)
-        varLatencies[mc] = np.var(latencies)
-        del Net        
-        """ live plot
-        ax1.cla()
-        ax2.cla()
-        for i, Node in enumerate(Net.Nodes):
-            ax1.plot(np.arange(0, TimeSteps*STEP, STEP), avgLmds[:,Node.NodeID])
-        plt.pause(0.1)
-        ax2.plot(np.arange(0, TimeSteps*STEP, STEP), avgMSDs)
-        plt.pause(0.1)
-        plt.show()
-        """
-    # get results
+        latencies += Net.tran_latency()
+        del Net
+    """
+    Get results
+    """
     avgLmds = sum(mcResults[0])/len(mcResults[0])
     avgUtil = 100*np.sum(avgLmds, axis=1)/NU
     avgInboxLen = sum(mcResults[1])/len(mcResults[1])
     avgMSDs = sum(mcResults[2])/len(mcResults[2])
-    # create a directory for these results
-    dirstr = 'data/nu='+str(NU)+'/'+'alpha='+str(ALPHA)+'/'+'beta='+str(BETA)+'/'+'tau='+str(WAIT_TIME)+'/'+'inbox='+str(MAX_INBOX_LEN)+'/'+'nodes='+str(NUM_NODES)+'/'+'neighbours='+str(NUM_NEIGHBOURS)+'/'+'mana='+''.join(str(int(e)) for e in MANA)+'/'+'simtime='+str(SIM_TIME)+'/'+'nmc='+str(MONTE_CARLOS)
+    """
+    Create a directory for these results and save them
+    """
     Path(dirstr).mkdir(parents=True, exist_ok=True)
-    # save results in this directory
     np.savetxt(dirstr+'/avgMSDs.csv', avgMSDs, delimiter=',')
     np.savetxt(dirstr+'/avgLmds.csv', avgLmds, delimiter=',')
     np.savetxt(dirstr+'/avgUtil.csv', avgUtil, delimiter=',')
     np.savetxt(dirstr+'/avgInboxLen.csv', avgInboxLen, delimiter=',')
-    np.savetxt(dirstr+'/avgLatencies.csv', avgLatencies, delimiter=',')
-    np.savetxt(dirstr+'/varLatencies.csv', varLatencies, delimiter=',')
-    # plot
-    ax1.cla()
-    ax2.cla()
-    for i in range(NUM_NODES):
-        ax1.plot(np.arange(0, TimeSteps*STEP, STEP), avgLmds[:,i])
-    ax2.plot(np.arange(0, TimeSteps*STEP, STEP), avgMSDs)
-    ax3.plot(np.arange(0, TimeSteps*STEP, STEP), avgUtil)
-    ax4.plot(np.arange(0, TimeSteps*STEP, STEP), avgInboxLen)
-    plt.show()
+    np.savetxt(dirstr+'/latencies.csv', np.asarray(latencies), delimiter=',')
+    nx.write_adjlist(G, dirstr+'/result_adjlist.txt', delimiter=' ')
+    
+def plot_results(dirstr):
+    """
+    Initialise plots
+    """
+    plt.close('all')
+    fig1, ax1 = plt.subplots()
+    fig2, ax2 = plt.subplots()
+    fig3, ax3 = plt.subplots()
+    fig4, ax4 = plt.subplots()
+    ax1.set_xlabel('Time')
+    ax1.set_ylabel('Lambda')
+    ax1.legend(list(map(str, range(NUM_NODES))))
+    ax2.set_xlabel('Time')
+    ax2.set_ylabel('Max Symmetric Difference')
+    ax3.set_xlabel('Time')
+    ax3.set_ylabel('Network Utilisation (%)')
+    ax4.set_xlabel('Time')
+    ax4.set_ylabel('Inbox Length')
+    
+    """
+    Load results from the data directory
+    """
+    avgMSDs = np.loadtxt(dirstr+'/avgMSDs.csv', delimiter=',')
+    avgLmds = np.loadtxt(dirstr+'/avgLmds.csv', delimiter=',')
+    avgUtil = np.loadtxt(dirstr+'/avgUtil.csv', delimiter=',')
+    avgInboxLen = np.loadtxt(dirstr+'/avgInboxLen.csv', delimiter=',')
+    latencies = np.loadtxt(dirstr+'/latencies.csv', delimiter=',')
     """
     Plot results
     """
+    for i in range(NUM_NODES):
+        ax1.plot(np.arange(0, SIM_TIME, STEP), avgLmds[:,i])
+    ax2.plot(np.arange(0, SIM_TIME, STEP), avgMSDs)
+    ax3.plot(np.arange(0, SIM_TIME, STEP), avgUtil)
+    ax4.plot(np.arange(0, SIM_TIME, STEP), avgInboxLen)
     
+    plt.figure()
+    bins = np.arange(0, round(max(latencies)), STEP)
+    plt.hist(latencies, bins=bins, density=True)
+    plt.xlabel('Latency(s)')
+    plt.ylabel('Probability')
     """
-    for i, Node in enumerate(Net.Nodes):
-        ax1[0].plot(np.arange(0, TimeSteps*STEP, STEP), AvgSymDiffs[:,Node.NodeID])
-    ax1[0].set_xlabel('Time')
-    ax1[0].set_ylabel('Avg Symmetric Diff')
-    ax1[0].legend(list(map(str, range(NUM_NODES))))
-    
-    ax1[1].plot(np.arange(0, TimeSteps*STEP, STEP), MaxSymDiff)
-    ax1[1].set_xlabel('Time')
-    ax1[1].set_ylabel('Max Symmetric Diff')
-    
-    for Node in Net.Nodes:
-        ax1[2].plot(np.arange(0, TimeSteps*STEP, STEP), Tips[:,Node.NodeID])
-    ax1[2].set_xlabel('Time')
-    ax1[2].set_ylabel('Number of Tips')
-    ax1[2].legend(list(map(str, range(NUM_NODES))))
-    
-    for Node in Net.Nodes:
-        ax1[3].plot(np.arange(0, TimeSteps*STEP, STEP), QLen[:,Node.NodeID])
-    ax1[3].set_xlabel('Time')
-    ax1[3].set_ylabel('Inbox Length')
-    ax1[3].legend(list(map(str, range(NUM_NODES))))
-    
-    
-    fig, ax2 = plt.subplots(3, 1)
-    
-    for i, Node in enumerate(Net.Nodes):
-        ax2[0].plot(np.arange(0, TimeSteps*STEP, STEP), Lmds[:,Node.NodeID])
-    ax2[0].set_xlabel('Time')
-    ax2[0].set_ylabel('Lambda')
-    ax2[0].legend(list(map(str, range(NUM_NODES))))
-    
-    for i, Node in enumerate(Net.Nodes):
-        movavg = np.convolve(Lmds[:,Node.NodeID], np.ones((500,))/500, mode='valid')
-        ax2[1].plot(np.arange(0, len(movavg)*STEP, STEP), movavg, '--')
-    ax2[1].set_xlabel('Time')
-    ax2[1].set_ylabel('Lambda  (Moving Average)')
-    ax2[1].legend(list(map(str, range(NUM_NODES))))
-    
-    Utilisation = 100*np.sum(Lmds, axis=1)/NU
-    ax2[2].plot(np.arange(0, TimeSteps*STEP, STEP), Utilisation)
-    ax2[2].set_xlabel('Time')
-    ax2[2].set_ylabel('Utilisation (%)')
-    
-    plt.show()
+    Draw network graph used in this simulation
+    """
+    G = nx.read_adjlist(dirstr+'/result_adjlist.txt', delimiter=' ')
     plt.figure()
     pos = nx.spring_layout(G)
     nx.draw(G, pos)#, node_color=colors[0:NUM_NODES])
     plt.show()
-    """
+    
 
 class Transaction:
     """
