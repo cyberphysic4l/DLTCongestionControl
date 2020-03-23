@@ -9,7 +9,7 @@ from random import sample
 from pathlib import Path
 
 # Simulation Parameters
-MONTE_CARLOS = 100
+MONTE_CARLOS = 1
 SIM_TIME = 600
 STEP = 0.1
 # Network Parameters
@@ -21,12 +21,12 @@ MANA[0] = 5
 MANA[1] = 5
 # AIMD Parameters
 ALPHA = 0.01*NU
-BETA = 0.9
+BETA = 0.8
 WAIT_TIME = 5
 MAX_INBOX_LEN = WAIT_TIME*NU # length of inbox that would empty in WAIT_TIME
     
 def main():
-    dirstr = 'data/nu='+str(NU)+'/'+'alpha='+str(ALPHA)+'/'+'beta='+str(BETA)+'/'+'tau='+str(WAIT_TIME)+'/'+'inbox='+str(MAX_INBOX_LEN)+'/'+'nodes='+str(NUM_NODES)+'/'+'neighbours='+str(NUM_NEIGHBOURS)+'/'+'mana='+''.join(str(int(e)) for e in MANA)+'/'+'simtime='+str(SIM_TIME)+'/'+'nmc='+str(MONTE_CARLOS)
+    dirstr = 'data/nocointoss/nu='+str(NU)+'/'+'alpha='+str(ALPHA)+'/'+'beta='+str(BETA)+'/'+'tau='+str(WAIT_TIME)+'/'+'inbox='+str(MAX_INBOX_LEN)+'/'+'nodes='+str(NUM_NODES)+'/'+'neighbours='+str(NUM_NEIGHBOURS)+'/'+'mana='+''.join(str(int(e)) for e in MANA)+'/'+'simtime='+str(SIM_TIME)+'/'+'nmc='+str(MONTE_CARLOS)
     if not Path(dirstr).exists():
         print("Simulating")
         simulate(dirstr)
@@ -290,12 +290,6 @@ class Node:
             
     def back_off(self, Time):
         self.LastCongestion = Time
-        # always back off if rate is above the allocated minimum
-        if self.Lambda > NU*MANA[self.NodeID]/sum(MANA):
-            # add coin toss
-            if np.random.random()>0.5:
-                self.BackOff = True
-                return
         # count number of TXs from each neighbour (and self) in the inbox
         NodeTrans = np.zeros(len(self.Neighbours)+1)
         for Packet in self.FilteredInbox:
@@ -305,10 +299,6 @@ class Node:
             if self.Network.Nodes[IssuingNodeID] in self.Neighbours:
                 index = self.Neighbours.index(self.Network.Nodes[IssuingNodeID])
                 NodeTrans[index+1] += 1/MANA[IssuingNodeID]
-        """
-        if self.Lambda < NU*MANA[self.NodeID]/sum(MANA):
-            NodeTrans[0] = 0 # never back off if already below allocated min
-        """
         # Probability of backing off
         if sum(NodeTrans)>0:
             Probs = (NodeTrans)/sum(NodeTrans)
