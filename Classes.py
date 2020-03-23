@@ -20,7 +20,7 @@ MANA = np.ones(NUM_NODES)
 MANA[0] = 5
 MANA[1] = 5
 # AIMD Parameters
-ALPHA = 0.02*NU
+ALPHA = 0.01*NU
 BETA = 0.9
 WAIT_TIME = 5
 MAX_INBOX_LEN = WAIT_TIME*NU # length of inbox that would empty in WAIT_TIME
@@ -104,19 +104,6 @@ def plot_results(dirstr):
     Initialise plots
     """
     plt.close('all')
-    fig1, ax1 = plt.subplots()
-    fig2, ax2 = plt.subplots()
-    fig3, ax3 = plt.subplots()
-    fig4, ax4 = plt.subplots()
-    ax1.set_xlabel('Time')
-    ax1.set_ylabel('Lambda')
-    ax1.legend(list(map(str, range(NUM_NODES))))
-    ax2.set_xlabel('Time')
-    ax2.set_ylabel('Max Symmetric Difference')
-    ax3.set_xlabel('Time')
-    ax3.set_ylabel('Network Utilisation (%)')
-    ax4.set_xlabel('Time')
-    ax4.set_ylabel('Inbox Length')
     
     """
     Load results from the data directory
@@ -129,17 +116,38 @@ def plot_results(dirstr):
     """
     Plot results
     """
+    fig1, ax1 = plt.subplots()
+    ax1.set_xlabel('Time')
+    ax1.set_ylabel('Lambda')
+    ax1.legend(list(map(str, range(NUM_NODES))))
     for i in range(NUM_NODES):
         ax1.plot(np.arange(0, SIM_TIME, STEP), avgLmds[:,i])
+    plt.savefig(dirstr+'/Lambdas.png')
+    
+    fig2, ax2 = plt.subplots()
+    ax2.set_xlabel('Time')
+    ax2.set_ylabel('Max Symmetric Difference')
     ax2.plot(np.arange(0, SIM_TIME, STEP), avgMSDs)
+    plt.savefig(dirstr+'/SymDif.png')
+    
+    fig3, ax3 = plt.subplots()
+    ax3.set_xlabel('Time')
+    ax3.set_ylabel('Network Utilisation (%)')
     ax3.plot(np.arange(0, SIM_TIME, STEP), avgUtil)
+    plt.savefig(dirstr+'/Util.png')
+    
+    fig4, ax4 = plt.subplots()
+    ax4.set_xlabel('Time')
+    ax4.set_ylabel('Inbox Length')
     ax4.plot(np.arange(0, SIM_TIME, STEP), avgInboxLen)
+    plt.savefig(dirstr+'/Inbox.png')
     
     plt.figure()
     bins = np.arange(0, round(max(latencies)), STEP)
     plt.hist(latencies, bins=bins, density=True)
     plt.xlabel('Latency(s)')
     plt.ylabel('Probability')
+    plt.savefig(dirstr+'/Latency.png')
     """
     Draw network graph used in this simulation
     """
