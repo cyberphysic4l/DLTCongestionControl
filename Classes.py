@@ -26,7 +26,7 @@ WAIT_TIME = 5
 MAX_INBOX_LEN = WAIT_TIME*NU # length of inbox that would empty in WAIT_TIME
     
 def main():
-    dirstr = 'data/nu='+str(NU)+'/'+'alpha='+str(ALPHA)+'/'+'beta='+str(BETA)+'/'+'tau='+str(WAIT_TIME)+'/'+'inbox='+str(MAX_INBOX_LEN)+'/'+'nodes='+str(NUM_NODES)+'/'+'neighbours='+str(NUM_NEIGHBOURS)+'/'+'mana='+''.join(str(int(e)) for e in MANA)+'/'+'simtime='+str(SIM_TIME)+'/'+'nmc='+str(MONTE_CARLOS)
+    dirstr = 'data/nomin/nu='+str(NU)+'/'+'alpha='+str(ALPHA)+'/'+'beta='+str(BETA)+'/'+'tau='+str(WAIT_TIME)+'/'+'inbox='+str(MAX_INBOX_LEN)+'/'+'nodes='+str(NUM_NODES)+'/'+'neighbours='+str(NUM_NEIGHBOURS)+'/'+'mana='+''.join(str(int(e)) for e in MANA)+'/'+'simtime='+str(SIM_TIME)+'/'+'nmc='+str(MONTE_CARLOS)
     if not Path(dirstr).exists():
         print("Simulating")
         simulate(dirstr)
@@ -42,19 +42,7 @@ def simulate(dirstr):
     # seed rng
     np.random.seed(0)
     TimeSteps = int(SIM_TIME/STEP)
-    """
-    Generate network topology:
-    Comment out one of the below lines for either random k-regular graph or a
-    graph from an adjlist txt file i.e. from the autopeering simulator
-    """
-    G = nx.random_regular_graph(NUM_NEIGHBOURS, NUM_NODES)
-    #G = nx.read_adjlist('input_adjlist.txt', delimiter=' ')
-    # Get adjacency matrix and weight by delay at each channel
-    ChannelDelays = 0.9*np.ones((NUM_NODES, NUM_NODES))+0.2*np.random.rand(NUM_NODES, NUM_NODES)
-    AdjMatrix = np.multiply(1*np.asarray(nx.to_numpy_matrix(G)), ChannelDelays)
-    # Node parameters
-    Lambdas = NU*MANA/sum(MANA)
-    Nus = NU*(np.ones(NUM_NODES))
+   
     
     """
     Monte Carlo Sims
@@ -63,6 +51,19 @@ def simulate(dirstr):
     latencies = []
     for mc in range(MONTE_CARLOS):
         print(mc)
+        """
+        Generate network topology:
+        Comment out one of the below lines for either random k-regular graph or a
+        graph from an adjlist txt file i.e. from the autopeering simulator
+        """
+        G = nx.random_regular_graph(NUM_NEIGHBOURS, NUM_NODES)
+        #G = nx.read_adjlist('input_adjlist.txt', delimiter=' ')
+        # Get adjacency matrix and weight by delay at each channel
+        ChannelDelays = 0.9*np.ones((NUM_NODES, NUM_NODES))+0.2*np.random.rand(NUM_NODES, NUM_NODES)
+        AdjMatrix = np.multiply(1*np.asarray(nx.to_numpy_matrix(G)), ChannelDelays)
+        # Node parameters
+        Lambdas = NU*MANA/sum(MANA)
+        Nus = NU*(np.ones(NUM_NODES))
         Net = Network(AdjMatrix, Lambdas, Nus)
         mcResults[0].append(np.zeros((TimeSteps, NUM_NODES)))
         mcResults[1].append(np.zeros((TimeSteps, NUM_NODES)))
@@ -290,12 +291,10 @@ class Node:
             
     def back_off(self, Time):
         self.LastCongestion = Time
-        # always back off if rate is above the allocated minimum
-        if self.Lambda > NU*MANA[self.NodeID]/sum(MANA):
-            # add coin toss
-            if np.random.random()>0.5:
-                self.BackOff = True
-                return
+        # toss a coin to decide if you back off yourself
+        if np.random.random()>0.5:
+            self.BackOff = True
+            return
         # count number of TXs from each neighbour (and self) in the inbox
         NodeTrans = np.zeros(len(self.Neighbours)+1)
         for Packet in self.FilteredInbox:
@@ -305,10 +304,6 @@ class Node:
             if self.Network.Nodes[IssuingNodeID] in self.Neighbours:
                 index = self.Neighbours.index(self.Network.Nodes[IssuingNodeID])
                 NodeTrans[index+1] += 1/MANA[IssuingNodeID]
-        """
-        if self.Lambda < NU*MANA[self.NodeID]/sum(MANA):
-            NodeTrans[0] = 0 # never back off if already below allocated min
-        """
         # Probability of backing off
         if sum(NodeTrans)>0:
             Probs = (NodeTrans)/sum(NodeTrans)
