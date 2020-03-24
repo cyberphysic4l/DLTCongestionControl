@@ -9,7 +9,7 @@ from random import sample
 from pathlib import Path
 
 # Simulation Parameters
-MONTE_CARLOS = 100
+MONTE_CARLOS = 10
 SIM_TIME = 600
 STEP = 0.1
 # Network Parameters
@@ -26,7 +26,7 @@ WAIT_TIME = 5
 MAX_INBOX_LEN = NU # length of inbox that would empty in WAIT_TIME
     
 def main():
-    dirstr = 'data/priorityinbox/nu='+str(NU)+'/'+'alpha='+str(ALPHA)+'/'+'beta='+str(BETA)+'/'+'tau='+str(WAIT_TIME)+'/'+'inbox='+str(MAX_INBOX_LEN)+'/'+'nodes='+str(NUM_NODES)+'/'+'neighbours='+str(NUM_NEIGHBOURS)+'/'+'mana='+''.join(str(int(e)) for e in MANA)+'/'+'simtime='+str(SIM_TIME)+'/'+'nmc='+str(MONTE_CARLOS)
+    dirstr = 'data/priorityinbox/samegraph/nu='+str(NU)+'/'+'alpha='+str(ALPHA)+'/'+'beta='+str(BETA)+'/'+'tau='+str(WAIT_TIME)+'/'+'inbox='+str(MAX_INBOX_LEN)+'/'+'nodes='+str(NUM_NODES)+'/'+'neighbours='+str(NUM_NEIGHBOURS)+'/'+'mana='+''.join(str(int(e)) for e in MANA)+'/'+'simtime='+str(SIM_TIME)+'/'+'nmc='+str(MONTE_CARLOS)
     if not Path(dirstr).exists():
         print("Simulating")
         simulate(dirstr)
@@ -42,7 +42,19 @@ def simulate(dirstr):
     # seed rng
     np.random.seed(0)
     TimeSteps = int(SIM_TIME/STEP)
-    
+    """
+    Generate network topology:
+    Comment out one of the below lines for either random k-regular graph or a
+    graph from an adjlist txt file i.e. from the autopeering simulator
+    """
+    G = nx.random_regular_graph(NUM_NEIGHBOURS, NUM_NODES)
+    #G = nx.read_adjlist('input_adjlist.txt', delimiter=' ')
+    # Get adjacency matrix and weight by delay at each channel
+    ChannelDelays = 0.9*np.ones((NUM_NODES, NUM_NODES))+0.2*np.random.rand(NUM_NODES, NUM_NODES)
+    AdjMatrix = np.multiply(1*np.asarray(nx.to_numpy_matrix(G)), ChannelDelays)
+    # Node parameters
+    Lambdas = NU*MANA/sum(MANA)
+    Nus = NU*(np.ones(NUM_NODES))
     """
     Monte Carlo Sims
     """
@@ -50,19 +62,7 @@ def simulate(dirstr):
     latencies = []
     for mc in range(MONTE_CARLOS):
         print(mc)
-        """
-        Generate network topology:
-        Comment out one of the below lines for either random k-regular graph or a
-        graph from an adjlist txt file i.e. from the autopeering simulator
-        """
-        G = nx.random_regular_graph(NUM_NEIGHBOURS, NUM_NODES)
-        #G = nx.read_adjlist('input_adjlist.txt', delimiter=' ')
-        # Get adjacency matrix and weight by delay at each channel
-        ChannelDelays = 0.9*np.ones((NUM_NODES, NUM_NODES))+0.2*np.random.rand(NUM_NODES, NUM_NODES)
-        AdjMatrix = np.multiply(1*np.asarray(nx.to_numpy_matrix(G)), ChannelDelays)
-        # Node parameters
-        Lambdas = NU*MANA/sum(MANA)
-        Nus = NU*(np.ones(NUM_NODES))
+        
         Net = Network(AdjMatrix, Lambdas, Nus)
         mcResults[0].append(np.zeros((TimeSteps, NUM_NODES)))
         mcResults[1].append(np.zeros((TimeSteps, NUM_NODES)))
@@ -251,43 +251,52 @@ class Node:
         """
         Process TXs in inbox of TXs received from neighbours
         """
-        # first, sort the inbox by the time the TXs arrived there (FIFO)
-        self.Inbox.sort(key=lambda p: p.EndTime)
-        # sort priority inboxes too
+        # sort inboxes by arrival time
         for NodeID in range(NUM_NODES):
             self.PriorityInbox[NodeID].sort(key=lambda p: p.EndTime)
+        self.FilteredInbox.sort(key=lambda p: p.EndTime)
         # process according to global rate Nu
         nTX = np.random.poisson(STEP*self.Nu)
         times = np.sort(np.random.uniform(Time, Time+STEP, nTX))
         i = 0
-        Probs = np.zeros(NUM_NODES)
         while i < nTX:
             if self.FilteredInbox:
-                #select a node who's tx you want to process
-                NodeID = np.random.choice(range(NUM_NODES), p=MANA/sum(MANA))
-                if not self.PriorityInbox[NodeID]:
-                    continue
-                else:
-                    Tran = self.PriorityInbox[NodeID][0].Data
-                    if Tran not in self.Tangle:
-                        self.Tangle.append(Tran)
-                        # mark this TX as received by this node
-                        Tran.InformedNodes.append(self)
-                        if len(Tran.InformedNodes)==NUM_NODES:
-                            Tran.GlobalSolidTime = times[i]
-                        if not Tran.Children:
-                            self.TipsSet.append(Tran)
-                        if Tran.Parents:
-                            for Parent in Tran.Parents:
-                                Parent.Children.append(Tran)
-                                if Parent in self.TipsSet:
-                                    self.TipsSet.remove(Parent)
-                                else:
-                                    continue
-                    # send these to all neighbours
-                    self.Network.broadcast_data(self, self.PriorityInbox[NodeID][0], times[i])
-                    i += 1
-                self.remove_from_inbox(self.PriorityInbox[NodeID][0])
+                # calculate current active mana from inbox contents
+                ActiveMana = 0
+                for NodeID in range(NUM_NODES):
+                    if self.PriorityInbox[NodeID]:
+                        ActiveMana += MANA[NodeID]
+                # update priority of inbox packets
+                for Packet in self.FilteredInbox:
+                    IssuingNodeID = Packet.Data.NodeID
+                    PInboxLen = len(self.PriorityInbox[IssuingNodeID])
+                    Packet.Priority += MANA[IssuingNodeID]/(ActiveMana*PInboxLen)
+                # sort filtered inbox by priority
+                self.FilteredInbox.sort(key=lambda p: p.Priority)
+                # take highest priority transaction
+                Tran = self.FilteredInbox[0].Data
+                if Tran not in self.Tangle:
+                    self.Tangle.append(Tran)
+                    # mark this TX as received by this node
+                    Tran.InformedNodes.append(self)
+                    if len(Tran.InformedNodes)==NUM_NODES:
+                        Tran.GlobalSolidTime = times[i]
+                    if not Tran.Children:
+                        self.TipsSet.append(Tran)
+                    if Tran.Parents:
+                        for Parent in Tran.Parents:
+                            Parent.Children.append(Tran)
+                            if Parent in self.TipsSet:
+                                self.TipsSet.remove(Parent)
+                            else:
+                                continue
+                # reset priority of the packet for forwarding
+                self.FilteredInbox[0].Priority = 0
+                # broadcast the packet
+                self.Network.broadcast_data(self, self.FilteredInbox[0], times[i])
+                # remove the transaction from all inboxes
+                self.remove_from_inbox(self.FilteredInbox[0])
+                i += 1
             else:
                 break
     
@@ -361,6 +370,10 @@ class Packet:
         self.Data = Data
         self.StartTime = StartTime
         self.EndTime = []
+        self.Priority = 0
+        
+    def increment_priority(self):
+        self.Priority += MANA[self.Data.NodeID]
     
 class CommChannel:
     """
