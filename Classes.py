@@ -9,21 +9,23 @@ from random import sample
 from pathlib import Path
 
 # Simulation Parameters
-MONTE_CARLOS = 10
+MONTE_CARLOS = 100
 SIM_TIME = 600
 STEP = 0.1
 # Network Parameters
 NU = 10
-NUM_NODES = 10
+NUM_NODES = 20
 NUM_NEIGHBOURS = 4
 MANA = np.ones(NUM_NODES)
 MANA[0] = 5
 MANA[1] = 5
+MAX_PRIORITY = 20*sum(MANA)
+MIN_PRIORITY = -MAX_PRIORITY
 # AIMD Parameters
 ALPHA = 0.01*NU
 BETA = 0.7
 WAIT_TIME = 5
-MAX_INBOX_LEN = NU # length of inbox that would empty in WAIT_TIME
+MAX_INBOX_LEN = WAIT_TIME # worst case number of TXs that empty each second
     
 def main():
     dirstr = 'data/priorityinbox/samegraph/nu='+str(NU)+'/'+'alpha='+str(ALPHA)+'/'+'beta='+str(BETA)+'/'+'tau='+str(WAIT_TIME)+'/'+'inbox='+str(MAX_INBOX_LEN)+'/'+'nodes='+str(NUM_NODES)+'/'+'neighbours='+str(NUM_NEIGHBOURS)+'/'+'mana='+''.join(str(int(e)) for e in MANA)+'/'+'simtime='+str(SIM_TIME)+'/'+'nmc='+str(MONTE_CARLOS)
@@ -47,8 +49,8 @@ def simulate(dirstr):
     Comment out one of the below lines for either random k-regular graph or a
     graph from an adjlist txt file i.e. from the autopeering simulator
     """
-    G = nx.random_regular_graph(NUM_NEIGHBOURS, NUM_NODES)
-    #G = nx.read_adjlist('input_adjlist.txt', delimiter=' ')
+    #G = nx.random_regular_graph(NUM_NEIGHBOURS, NUM_NODES)
+    G = nx.read_adjlist('input_adjlist.txt', delimiter=' ')
     # Get adjacency matrix and weight by delay at each channel
     ChannelDelays = 0.9*np.ones((NUM_NODES, NUM_NODES))+0.2*np.random.rand(NUM_NODES, NUM_NODES)
     AdjMatrix = np.multiply(1*np.asarray(nx.to_numpy_matrix(G)), ChannelDelays)
@@ -76,7 +78,7 @@ def simulate(dirstr):
             # save summary results in output arrays
             for Node in Net.Nodes:
                 mcResults[0][mc][i, Node.NodeID] = Node.Lambda
-                mcResults[1][mc][i, Node.NodeID] = len(Node.FilteredInbox)
+                mcResults[1][mc][i, Node.NodeID] = len(Net.Nodes[0].Inbox.Packets[Node.NodeID])
             SymDiffs = Net.sym_diffs()
             mcResults[2][mc][i] = SymDiffs.max()
         latencies += Net.tran_latency()
@@ -157,16 +159,6 @@ def plot_results(dirstr):
     nx.draw(G, pos)#, node_color=colors[0:NUM_NODES])
     plt.show()
 
-def mana_length(Inbox):
-    ManaLength = 0
-    if Inbox:
-        for Packet in Inbox:
-            NodeID = Packet.Data.NodeID
-            ManaLength += 1/MANA[NodeID]
-        return ManaLength
-    else:
-        return 0
-
 class Transaction:
     """
     Object to simulate a transaction its edges in the DAG
@@ -202,9 +194,7 @@ class Node:
         self.PoWDelay = PoWDelay
         self.Neighbours = []
         self.Network = Network
-        self.Inbox = []
-        self.InboxTrans = []
-        self.FilteredInbox = []
+        self.Inbox = Inbox()
         self.Lambda = Lambda
         self.Nu = Nu
         self.NodeID = NodeID
@@ -212,11 +202,6 @@ class Node:
         self.BackOff = []
         self.LastBackOff = []
         self.LastCongestion = []
-        self.CongNotifRx = False
-        
-        self.PriorityInbox = []
-        for i in range(NUM_NODES):
-            self.PriorityInbox.append([])
         
     def generate_txs(self, Time):
         """
@@ -253,28 +238,36 @@ class Node:
         """
         # sort inboxes by arrival time
         for NodeID in range(NUM_NODES):
-            self.PriorityInbox[NodeID].sort(key=lambda p: p.EndTime)
-        self.FilteredInbox.sort(key=lambda p: p.EndTime)
+            self.Inbox.Packets[NodeID].sort(key=lambda p: p.EndTime)
         # process according to global rate Nu
         nTX = np.random.poisson(STEP*self.Nu)
         times = np.sort(np.random.uniform(Time, Time+STEP, nTX))
         i = 0
         while i < nTX:
-            if self.FilteredInbox:
-                # calculate current active mana from inbox contents
-                ActiveMana = 0
+            if self.Inbox.AllPackets:
+                # update priority of inbox channels
                 for NodeID in range(NUM_NODES):
-                    if self.PriorityInbox[NodeID]:
-                        ActiveMana += MANA[NodeID]
-                # update priority of inbox packets
-                for Packet in self.FilteredInbox:
-                    IssuingNodeID = Packet.Data.NodeID
-                    PInboxLen = len(self.PriorityInbox[IssuingNodeID])
-                    Packet.Priority += MANA[IssuingNodeID]/(ActiveMana*PInboxLen)
-                # sort filtered inbox by priority
-                self.FilteredInbox.sort(key=lambda p: p.Priority)
-                # take highest priority transaction
-                Tran = self.FilteredInbox[0].Data
+                    if self.Inbox.Packets[NodeID]:
+                        self.Inbox.Active[NodeID] = True
+                    if self.Inbox.Active[NodeID]:
+                        self.Inbox.Priority[NodeID] += MANA[NodeID]
+                # First sort by priority
+                PriorityOrder = sorted(range(NUM_NODES), key=lambda k: self.Inbox.Priority[k], reverse=True)
+                # take highest priority nonempty queue with oldest tx
+                EarliestTime = Time
+                HighestPriority = -float('Inf')
+                for NodeID in PriorityOrder:
+                    if self.Inbox.Packets[NodeID]:
+                        Priority = self.Inbox.Priority[NodeID]
+                        if Priority>=HighestPriority:
+                            HighestPriority = Priority
+                            ArrivalTime = self.Inbox.Packets[NodeID][0].EndTime
+                            if ArrivalTime<=EarliestTime:
+                                EarliestTime = ArrivalTime
+                                BestNodeID = NodeID
+                        else:
+                            break
+                Tran = self.Inbox.Packets[BestNodeID][0].Data
                 if Tran not in self.Tangle:
                     self.Tangle.append(Tran)
                     # mark this TX as received by this node
@@ -290,12 +283,12 @@ class Node:
                                 self.TipsSet.remove(Parent)
                             else:
                                 continue
-                # reset priority of the packet for forwarding
-                self.FilteredInbox[0].Priority = 0
+                # reduce priority of the inbox channel by total active mana amount
+                self.Inbox.Priority[BestNodeID] -= sum(MANA)-5
                 # broadcast the packet
-                self.Network.broadcast_data(self, self.FilteredInbox[0], times[i])
+                self.Network.broadcast_data(self, self.Inbox.Packets[BestNodeID][0], times[i])
                 # remove the transaction from all inboxes
-                self.remove_from_inbox(self.FilteredInbox[0])
+                self.remove_from_inbox(self.Inbox.Packets[BestNodeID][0])
                 i += 1
             else:
                 break
@@ -304,20 +297,14 @@ class Node:
         """
         Check if congestion is occurring
         """
-        if (len(self.FilteredInbox) > MAX_INBOX_LEN):
-            # ignore it if recently backed off
-            if self.LastCongestion:
-                if Time < self.LastCongestion + WAIT_TIME:
-                    return
-                
-            self.LastCongestion = Time
-            # back off if occupying more than entitled share of the Inbox
-            Utils = []
-            for NodeID in range(NUM_NODES):
-                if self.PriorityInbox[NodeID]:
-                    Utils.append(len(self.PriorityInbox[NodeID])/MANA[NodeID])
-                
-            if len(self.PriorityInbox[self.NodeID])/MANA[self.NodeID]>np.mean(Utils):
+        if self.Inbox.AllPackets:
+            if len(self.Inbox.Packets[self.NodeID])>MAX_INBOX_LEN*MANA[self.NodeID]:
+                # ignore it if recently backed off
+                if self.LastCongestion:
+                    if Time < self.LastCongestion + WAIT_TIME:
+                        return
+                    
+                self.LastCongestion = Time
                 self.BackOff = True
             
     def aimd_update(self, Time):
@@ -340,23 +327,34 @@ class Node:
         """
         Add to inbox if not already received and/or processed
         """
-        if Packet.Data not in self.InboxTrans:
+        if Packet.Data not in self.Inbox.Trans:
             if Packet.Data not in self.Tangle:
-                self.FilteredInbox.append(Packet)
-                IssuingNodeID = Packet.Data.NodeID
-                self.PriorityInbox[IssuingNodeID].append(Packet)
-                self.InboxTrans.append(Packet.Data)
+                self.Inbox.AllPackets.append(Packet)
+                self.Inbox.Packets[Packet.Data.NodeID].append(Packet)
+                self.Inbox.Trans.append(Packet.Data)
         
     def remove_from_inbox(self, Packet):
         """
         Remove from Inbox and filtered inbox etc
         """
-        if self.FilteredInbox:
-            if Packet in self.FilteredInbox:
-                self.FilteredInbox.remove(Packet)
-                IssuingNodeID = Packet.Data.NodeID
-                self.PriorityInbox[IssuingNodeID].remove(Packet)
-                self.InboxTrans.remove(Packet.Data)
+        if self.Inbox.Trans:
+            if Packet in self.Inbox.AllPackets:
+                self.Inbox.AllPackets.remove(Packet)
+                self.Inbox.Packets[Packet.Data.NodeID].remove(Packet)
+                self.Inbox.Trans.remove(Packet.Data)
+                
+class Inbox:
+    """
+    Object for holding packets in different channels corresponding to different nodes
+    """
+    def __init__(self):
+        self.AllPackets = []
+        self.Packets = []
+        for NodeID in range(NUM_NODES):
+            self.Packets.append([])
+        self.Trans = []
+        self.Priority = np.zeros(NUM_NODES)
+        self.Active = np.zeros(NUM_NODES, dtype=bool)
 
 class Packet:
     """
@@ -370,10 +368,6 @@ class Packet:
         self.Data = Data
         self.StartTime = StartTime
         self.EndTime = []
-        self.Priority = 0
-        
-    def increment_priority(self):
-        self.Priority += MANA[self.Data.NodeID]
     
 class CommChannel:
     """
