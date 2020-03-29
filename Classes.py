@@ -9,22 +9,22 @@ from random import sample
 from pathlib import Path
 
 # Simulation Parameters
-MONTE_CARLOS = 20
-SIM_TIME = 1200
+MONTE_CARLOS = 1
+SIM_TIME = 600
 SETTLING_TIME = 100
 STEP = 0.1
 # Network Parameters
 NU = 10
 NUM_NODES = 10
 NUM_NEIGHBOURS = 4
-MANA = np.ones(NUM_NODES)
-MANA[0] = 5
-MANA[1] = 5
-MAX_PRIORITY = 20*sum(MANA)
+REP = np.ones(NUM_NODES)
+REP[0] = 5
+REP[1] = 5
+MAX_PRIORITY = 20*sum(REP)
 MIN_PRIORITY = -MAX_PRIORITY
     
 def main():
-    dirstr = 'data/priorityinboxnoaimd/nu='+str(NU)+'/'+'nodes='+str(NUM_NODES)+'/'+'neighbours='+str(NUM_NEIGHBOURS)+'/'+'mana='+''.join(str(int(e)) for e in MANA)+'/'+'simtime='+str(SIM_TIME)+'/'+'nmc='+str(MONTE_CARLOS)
+    dirstr = 'data/priorityinboxnoaimd/nu='+str(NU)+'/'+'nodes='+str(NUM_NODES)+'/'+'neighbours='+str(NUM_NEIGHBOURS)+'/'+'rep='+''.join(str(int(e)) for e in REP)+'/'+'simtime='+str(SIM_TIME)+'/'+'nmc='+str(MONTE_CARLOS)
     if not Path(dirstr).exists():
         print("Simulating")
         simulate(dirstr)
@@ -51,7 +51,7 @@ def simulate(dirstr):
     ChannelDelays = 0.9*np.ones((NUM_NODES, NUM_NODES))+0.2*np.random.rand(NUM_NODES, NUM_NODES)
     AdjMatrix = np.multiply(1*np.asarray(nx.to_numpy_matrix(G)), ChannelDelays)
     # Node parameters
-    MaxLambdas = NU*MANA/sum(MANA)
+    MaxLambdas = NU*REP/sum(REP)
     Nus = NU*(np.ones(NUM_NODES))
     """
     Monte Carlo Sims
@@ -128,7 +128,7 @@ def plot_results(dirstr):
     for i in range(NUM_NODES):
         ax1.plot(np.arange(0, SIM_TIME, STEP), avgLmds[:,i])
     for i in range(NUM_NODES):
-        ax1.plot([0, SIM_TIME], [MANA[NodeID]*NU/sum(MANA), MANA[NodeID]*NU/sum(MANA)], 'r--')
+        ax1.plot([0, SIM_TIME], [REP[NodeID]*NU/sum(REP), REP[NodeID]*NU/sum(REP)], 'r--')
     plt.legend(range(NUM_NODES))
     plt.savefig(dirstr+'/Lambdas.png')
     
@@ -205,6 +205,8 @@ class Node:
         self.Neighbours = []
         self.Network = Network
         self.Inbox = Inbox()
+        self.Inbox.Active[NodeID] = True
+        self.Inbox.ActiveRep = REP[NodeID]
         self.Nu = Nu
         self.MaxLambda = MaxLambda
         self.NodeID = NodeID
@@ -268,7 +270,11 @@ class Node:
             if self.Inbox.AllPackets:
                 # update priority of inbox channels (assume all active for now)
                 for NodeID in range(NUM_NODES):
-                    self.Inbox.Priority[NodeID] += MANA[NodeID]
+                    if self.Inbox.Packets[NodeID] and not self.Inbox.Active[NodeID]:
+                        self.Inbox.Active[NodeID] = True
+                        self.Inbox.ActiveRep += REP[NodeID]
+                    if self.Inbox.Active[NodeID]:
+                        self.Inbox.Priority[NodeID] += REP[NodeID]
                 # First sort by priority
                 PriorityOrder = sorted(range(NUM_NODES), key=lambda k: self.Inbox.Priority[k], reverse=True)
                 # take highest priority nonempty queue with oldest tx
@@ -299,20 +305,22 @@ class Node:
                         self.add_to_ledger(TxNode, Tran, times[i])
                     # remove the transaction from all inboxes
                     self.remove_from_inbox(self.Inbox.Packets[BestNodeID][0])
-                # reduce priority of the inbox channel by total active mana amount
-                self.Inbox.Priority[BestNodeID] -= sum(MANA)
+                # reduce priority of the inbox channel by total active rep amount
+                self.Inbox.Priority[BestNodeID] -= self.Inbox.ActiveRep
                 i += 1
             else:
                 if Time>200:
                     self.EmptyInbox += 1
-                if np.random.random()<0.5:
+                
+                if np.random.random()<0.5*REP[self.NodeID]/self.Inbox.ActiveRep:
                     # update priority of inbox channels (assume all active for now)
                     for NodeID in range(NUM_NODES):
-                        self.Inbox.Priority[NodeID] += MANA[NodeID]
+                        if self.Inbox.Active[NodeID]:
+                            self.Inbox.Priority[NodeID] += REP[NodeID]
                     BestNodeID = self.NodeID
                     self.issue_tx(times[i])
-                    # reduce priority of the inbox channel by total active mana amount
-                    self.Inbox.Priority[BestNodeID] -= sum(MANA)
+                    # reduce priority of the inbox channel by total active rep amount
+                    self.Inbox.Priority[BestNodeID] -= self.Inbox.ActiveRep
                 i += 1
             
     def add_to_inbox(self, Packet):
@@ -347,6 +355,7 @@ class Inbox:
         self.Trans = []
         self.Priority = np.zeros(NUM_NODES)
         self.Active = np.zeros(NUM_NODES, dtype=bool)
+        self.ActiveRep = 0
 
 class Packet:
     """
