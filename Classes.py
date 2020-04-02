@@ -9,7 +9,7 @@ from random import sample
 from pathlib import Path
 
 # Simulation Parameters
-MONTE_CARLOS = 10
+MONTE_CARLOS = 100
 SIM_TIME = 1200
 STEP = 0.1
 # Network Parameters
@@ -19,7 +19,7 @@ NUM_NEIGHBOURS = 4
 REP = np.ones(NUM_NODES)
 REP[0] = 5
 REP[1] = 5
-MAX_BURST = 3*sum(REP)
+MAX_BURST = 3
 # AIMD Parameters
 ALPHA = 0.002*NU
 BETA = 0.8
@@ -387,9 +387,7 @@ class Inbox:
         if self.AllPackets:
             # update priority of inbox channels
             for NodeID in range(NUM_NODES):
-                if self.Packets[NodeID]: # if this node 
-                    if self.Priority[NodeID]<MAX_BURST:
-                        self.Priority[NodeID] += REP[NodeID]
+                self.Priority[NodeID] = min(self.Priority[NodeID]+REP[NodeID], MAX_BURST*sum(REP))
             # First sort by priority
             PriorityOrder = sorted(range(NUM_NODES), key=lambda k: self.Priority[k], reverse=True)
             # take highest priority nonempty queue with oldest tx
