@@ -9,7 +9,7 @@ from random import sample
 from pathlib import Path
 
 # Simulation Parameters
-MONTE_CARLOS = 1
+MONTE_CARLOS = 10
 SIM_TIME = 1200
 STEP = 0.1
 # Network Parameters
@@ -26,7 +26,7 @@ BETA = 0.8
 WAIT_TIME = 20
 MAX_INBOX_LEN = 5 # worst case number of TXs that empty each second
 
-SCHEDULING = 'wrr'
+SCHEDULING = 'tokenbucket'
     
 def main():
     dirstr = 'data/priorityinbox/scheduling='+SCHEDULING+'/nu='+str(NU)+'/'+'alpha='+str(ALPHA)+'/'+'beta='+str(BETA)+'/'+'tau='+str(WAIT_TIME)+'/'+'inbox='+str(MAX_INBOX_LEN)+'/'+'nodes='+str(NUM_NODES)+'/'+'neighbours='+str(NUM_NEIGHBOURS)+'/'+'rep='+''.join(str(int(e)) for e in REP)+'/'+'simtime='+str(SIM_TIME)+'/'+'nmc='+str(MONTE_CARLOS)
@@ -76,8 +76,12 @@ def simulate(dirstr):
         for i in range(TimeSteps):
             # discrete time step size specified by global variable STEP
             T = STEP*i
-            # update network for all new events in this time step
+            # set issue rate of node 0 to always be zero
             Net.Nodes[0].Lambda = 0
+            """
+            The next line is the function which ultimately calls all others
+            and runs the simulation for a time step
+            """
             Net.simulate(T)
             # save summary results in output arrays
             for Node in Net.Nodes:
@@ -365,7 +369,6 @@ class Inbox:
             self.Packets.append([])
         self.Trans = []
         self.Priority = np.zeros(NUM_NODES)
-        self.Active = np.zeros(NUM_NODES, dtype=bool)
        
     def remove_packet(self, Packet):
         """
@@ -381,10 +384,9 @@ class Inbox:
         if self.AllPackets:
             # update priority of inbox channels
             for NodeID in range(NUM_NODES):
-                if self.Packets[NodeID]:
-                    self.Active[NodeID] = True
-                if self.Active[NodeID] and self.Priority[NodeID]<MAX_BURST:
-                    self.Priority[NodeID] += REP[NodeID]
+                if self.Packets[NodeID]: # if this node 
+                    if self.Priority[NodeID]<MAX_BURST:
+                        self.Priority[NodeID] += REP[NodeID]
             # First sort by priority
             PriorityOrder = sorted(range(NUM_NODES), key=lambda k: self.Priority[k], reverse=True)
             # take highest priority nonempty queue with oldest tx
@@ -402,8 +404,11 @@ class Inbox:
                     else:
                         break
             Packet = self.Packets[BestNodeID][0]
-            # reduce priority of the inbox channel by total active rep amount
-            self.Priority[BestNodeID] -= sum(self.Priority)
+            # reduce priority of the inbox channel by total rep amount or to zero
+            if self.Priority[BestNodeID]>sum(REP):
+                self.Priority[BestNodeID] -= sum(REP)
+            else:
+                self.Priority[BestNodeID] = 0
             # remove the transaction from all inboxes
             self.remove_packet(Packet)
             return Packet
