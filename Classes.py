@@ -7,9 +7,10 @@ import matplotlib.pyplot as plt
 import networkx as nx
 from random import sample
 from pathlib import Path
+import math
 
 # Simulation Parameters
-MONTE_CARLOS = 1
+MONTE_CARLOS = 100
 SIM_TIME = 1200
 STEP = 0.1
 # Network Parameters
@@ -26,10 +27,11 @@ BETA = 0.8
 WAIT_TIME = 20
 MAX_INBOX_LEN = 5 # worst case number of TXs that empty each second
 
-SCHEDULING = 'wrr'
+SCHEDULING = 'gps'
+TP = 3
     
 def main():
-    dirstr = 'data/priorityinbox/scheduling='+SCHEDULING+'/nu='+str(NU)+'/'+'alpha='+str(ALPHA)+'/'+'beta='+str(BETA)+'/'+'tau='+str(WAIT_TIME)+'/'+'inbox='+str(MAX_INBOX_LEN)+'/'+'nodes='+str(NUM_NODES)+'/'+'neighbours='+str(NUM_NEIGHBOURS)+'/'+'rep='+''.join(str(int(e)) for e in REP)+'/'+'simtime='+str(SIM_TIME)+'/'+'nmc='+str(MONTE_CARLOS)
+    dirstr = 'data/scheduling='+SCHEDULING+'/tokenbucket'+'/nu='+str(NU)+'/'+'alpha='+str(ALPHA)+'/'+'beta='+str(BETA)+'/'+'tau='+str(WAIT_TIME)+'/'+'inbox='+str(MAX_INBOX_LEN)+'/'+'nodes='+str(NUM_NODES)+'/'+'neighbours='+str(NUM_NEIGHBOURS)+'/'+'rep='+''.join(str(int(e)) for e in REP)+'/'+'simtime='+str(SIM_TIME)+'/'+'nmc='+str(MONTE_CARLOS)
     if not Path(dirstr).exists():
         print("Simulating")
         simulate(dirstr)
@@ -104,7 +106,8 @@ def simulate(dirstr):
     for NodeID in range(NUM_NODES):
         np.savetxt(dirstr+'/latencies'+str(NodeID)+'.csv', np.asarray(latencies[NodeID]), delimiter=',')
     nx.write_adjlist(G, dirstr+'/result_adjlist.txt', delimiter=' ')
-    
+    plot_results(dirstr)
+        
 def plot_results(dirstr):
     """
     Initialise plots
@@ -226,7 +229,7 @@ class Node:
         self.PoWDelay = PoWDelay
         self.Neighbours = []
         self.Network = Network
-        self.Inbox = Inbox()
+        self.Inbox = Inbox(self)
         self.Lambda = Lambda
         self.Nu = Nu
         self.NodeID = NodeID
@@ -251,7 +254,6 @@ class Node:
                     self.TempTransactions.remove(Tran)
                     # add the TX to Inbox as though it came from a virtual neighbour
                     p = Packet(self, self, Tran, t)
-                    p.EndTime = t
                     self.add_to_inbox(p)
     
     def select_tips(self):
@@ -263,29 +265,6 @@ class Node:
         else:
             Selection = self.Ledger[-2:-1]
         return Selection
-    
-    def process_inbox(self, Time):
-        """
-        Process TXs in inbox of TXs received from neighbours
-        """
-        # sort inboxes by arrival time
-        for NodeID in range(NUM_NODES):
-            self.Inbox.Packets[NodeID].sort(key=lambda p: p.EndTime)
-        # process according to global rate Nu
-        nTX = np.random.poisson(STEP*self.Nu)
-        times = np.sort(np.random.uniform(Time, Time+STEP, nTX))
-        i = 0
-        while i < nTX:
-            if SCHEDULING=='tokenbucket':
-                Packet = self.Inbox.token_bucket_schedule(Time)
-            elif SCHEDULING=='wrr':
-                Packet = self.Inbox.wrr_schedule(Time)
-            if Packet is not None:
-                if Packet.Data not in self.Ledger:
-                    self.add_to_ledger(Packet.TxNode, Packet.Data, times[i])
-                i += 1
-            else:
-                break
     
     def add_to_ledger(self, TxNode, Tran, Time):
         """
@@ -317,7 +296,7 @@ class Node:
         Check if congestion is occurring
         """
         if self.Inbox.AllPackets:
-            if len(self.Inbox.Packets[self.NodeID])>MAX_INBOX_LEN*REP[self.NodeID]:
+            if len(self.Inbox.Packets[self.NodeID])>MAX_INBOX_LEN*REP[self.NodeID]+1:
                 # ignore it if recently backed off
                 if self.LastCongestion:
                     if Time < self.LastCongestion + WAIT_TIME:
@@ -346,6 +325,8 @@ class Node:
         """
         Add to inbox if not already received and/or processed
         """
+        # token bucket goes here
+        
         if Packet.Data not in self.Inbox.Trans:
             if Packet.Data not in self.Ledger:
                 self.Inbox.AllPackets.append(Packet)
@@ -358,14 +339,18 @@ class Inbox:
     """
     Object for holding packets in different channels corresponding to different nodes
     """
-    def __init__(self):
+    def __init__(self, Node):
+        self.Node = Node
         self.AllPackets = []
         self.Packets = []
+        self.TokenBucket = []
+        self.Tokens = []
         for NodeID in range(NUM_NODES):
             self.Packets.append([])
+            self.TokenBucket.append([])
+            self.Tokens.append(0)
         self.Trans = []
-        self.Priority = np.zeros(NUM_NODES)
-        self.Active = np.zeros(NUM_NODES, dtype=bool)
+        
        
     def remove_packet(self, Packet):
         """
@@ -377,47 +362,69 @@ class Inbox:
                 self.Packets[Packet.Data.NodeID].remove(Packet)
                 self.Trans.remove(Packet.Data)
     
-    def token_bucket_schedule(self, Time):
+    def has_packets(self, NodeID, Time):
+        if self.Packets[NodeID]:
+            if self.Packets[NodeID][0].Time<Time or math.isclose(self.Packets[NodeID][0].Time, Time):
+                return True
+        else:
+            return False
+        
+    def packet_start_times(self, Time1, Time2):
+        PacketStartTimes = []
+        for NodeID in range(NUM_NODES):
+            if self.Packets[NodeID]:
+                t = self.Packets[NodeID][0].Time
+                if t <= Time1:
+                    if Time1 not in PacketStartTimes:
+                        PacketStartTimes.append(Time1)
+                else:
+                    if t not in PacketStartTimes:
+                        PacketStartTimes.append(self.Packets[NodeID][0].Time)
+        PacketStartTimes.sort()
+        if not math.isclose(Time1,Time2):
+            PacketStartTimes.append(Time2)
+        return PacketStartTimes
+    
+    def first_finish_time(self, StartTime):
+        ActiveNodes = [NodeID for NodeID in range(NUM_NODES) if self.has_packets(NodeID, StartTime)]
+        reps = [REP[NodeID] for NodeID in ActiveNodes]
+        FirstFinishTime = StartTime+STEP
+        for i, NodeID in enumerate(ActiveNodes):
+            FinishTime = StartTime + (1/NU-self.Packets[NodeID][0].Proc)*sum(reps)/reps[i]
+            if FinishTime<FirstFinishTime:
+                FirstFinishTime = FinishTime
+        return FirstFinishTime
+    
+    def process(self, Time):
         if self.AllPackets:
-            # update priority of inbox channels
-            for NodeID in range(NUM_NODES):
-                if self.Packets[NodeID]:
-                    self.Active[NodeID] = True
-                if self.Active[NodeID] and self.Priority[NodeID]<MAX_BURST:
-                    self.Priority[NodeID] += REP[NodeID]
-            # First sort by priority
-            PriorityOrder = sorted(range(NUM_NODES), key=lambda k: self.Priority[k], reverse=True)
-            # take highest priority nonempty queue with oldest tx
-            EarliestTime = Time
-            HighestPriority = -float('Inf')
-            for NodeID in PriorityOrder:
-                if self.Packets[NodeID]:
-                    Priority = self.Priority[NodeID]
-                    if Priority>=HighestPriority:
-                        HighestPriority = Priority
-                        ArrivalTime = self.Packets[NodeID][0].EndTime
-                        if ArrivalTime<=EarliestTime:
-                            EarliestTime = ArrivalTime
-                            BestNodeID = NodeID
-                    else:
-                        break
-            Packet = self.Packets[BestNodeID][0]
-            # reduce priority of the inbox channel by total active rep amount
-            self.Priority[BestNodeID] -= sum(self.Priority)
-            # remove the transaction from all inboxes
-            self.remove_packet(Packet)
-            return Packet
-
-    def wrr_schedule(self, Time):
-        if self.AllPackets:
-            population = [NodeID for NodeID in range(NUM_NODES) if self.Packets[NodeID]]
-            reps = [REP[NodeID] for NodeID in population]
-            NodeID = np.random.choice(population, p=reps/sum(reps))
-            Packet = self.Packets[NodeID][0]
-            # remove the transaction from all inboxes
-            self.remove_packet(Packet)
-            return Packet
-
+            PacketStartTimes = self.packet_start_times(Time-STEP, Time)
+            i = 0
+            while len(PacketStartTimes)>1: # all but the last item in the list
+                i+=1
+                FirstFinishTime = self.first_finish_time(PacketStartTimes[0])
+                if FirstFinishTime<PacketStartTimes[1]:
+                    ProcTime = FirstFinishTime-PacketStartTimes[0]
+                else:
+                    ProcTime = PacketStartTimes[1]-PacketStartTimes[0]
+                ActiveNodes = [NodeID for NodeID in range(NUM_NODES) if self.has_packets(NodeID, PacketStartTimes[0])]
+                reps = [REP[NodeID] for NodeID in ActiveNodes]
+                # divide out the processor
+                ProcShare = (reps/sum(reps))*ProcTime
+                FinishTime = PacketStartTimes[0] + ProcTime
+                for j, NodeID in enumerate(ActiveNodes):
+                    Packet = self.Packets[NodeID][0]
+                    Packet.Proc += ProcShare[j]
+                    if math.isclose(Packet.Proc,1/NU):
+                        self.remove_packet(Packet)
+                        self.Node.add_to_ledger(Packet.TxNode, Packet.Data, FinishTime)
+                if math.isclose(FinishTime, Time):
+                    break
+                else: 
+                    PacketStartTimes = self.packet_start_times(FinishTime, Time)
+                if i>100:
+                    print('infinite loop')
+                    break
+                        
 class Packet:
     """
     Object for sending data including TXs and back off notifications over
@@ -428,8 +435,8 @@ class Packet:
         self.TxNode = TxNode
         self.RxNode = RxNode
         self.Data = Data
-        self.StartTime = StartTime
-        self.EndTime = []
+        self.Time = StartTime
+        self.Proc = 0
     
 class CommChannel:
     """
@@ -456,7 +463,7 @@ class CommChannel:
         """
         if self.Packets:
             for Packet in self.Packets:
-                t = Packet.StartTime+self.Delay
+                t = Packet.Time+self.Delay
                 if(t<=Time):
                     self.deliver_packet(Packet, t)
         else:
@@ -466,7 +473,7 @@ class CommChannel:
         """
         When packet has arrived at receiving node, process it
         """
-        Packet.EndTime = Time
+        Packet.Time = Time
         if isinstance(Packet.Data, Transaction):
             # if this is a transaction, add the Packet to Inbox
             self.RxNode.add_to_inbox(Packet)
@@ -520,7 +527,7 @@ class Network:
         """
         for Node in self.Nodes:
             Node.generate_txs(Time)
-            Node.process_inbox(Time)
+            Node.Inbox.process(Time)
             Node.check_congestion(Time)
             Node.aimd_update(Time)
         """
