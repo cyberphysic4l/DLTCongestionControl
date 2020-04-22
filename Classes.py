@@ -9,35 +9,47 @@ from random import sample
 from pathlib import Path
 
 # Simulation Parameters
-MONTE_CARLOS = 100
+MONTE_CARLOS = 10
 SIM_TIME = 1200
 STEP = 0.1
 # Network Parameters
-NU = 10
+NU = 5
 NUM_NODES = 10
 NUM_NEIGHBOURS = 4
-REP = np.ones(NUM_NODES)
-REP[0] = 5
-REP[1] = 5
-MAX_BURST = 3
+REP = np.ones(NUM_NODES, dtype=int)
+REP[0] = 9
+REP[1] = 7
+REP[2] = 5
+REP[3] = 3
+MAX_BURST = 10
+AIMD = np.ones(NUM_NODES)
+MULT = np.ones(NUM_NODES)
+ACTIVE = np.ones(NUM_NODES)
+ACTIVE[0] = 0
+'''
+# dishonest node
+MULT[4] = 4
+AIMD[4] = 0
+'''
 # AIMD Parameters
 ALPHA = 0.002*NU
 BETA = 0.8
 WAIT_TIME = 20
 MAX_INBOX_LEN = 5 # worst case number of TXs that empty each second
 
-SCHEDULING = 'tokenbucket'
+SCHEDULING = 'aimd'
     
 def main():
     '''
     Create directory for storing results with these parameters
     '''
-    dirstr = 'data/scheduling='+SCHEDULING+'/nu='+str(NU)+'/'+'alpha='+str(ALPHA)+'/'+'beta='+str(BETA)+'/'+'tau='+str(WAIT_TIME)+'/'+'inbox='+str(MAX_INBOX_LEN)+'/'+'nodes='+str(NUM_NODES)+'/'+'neighbours='+str(NUM_NEIGHBOURS)+'/'+'rep='+''.join(str(int(e)) for e in REP)+'/'+'simtime='+str(SIM_TIME)+'/'+'nmc='+str(MONTE_CARLOS)
+    dirstr = 'data/scheduling='+SCHEDULING+'/maxburst='+str(MAX_BURST)+'/nu='+str(NU)+'/rep='+''.join(str(int(e)) for e in REP)+'/active='+''.join(str(int(e)) for e in ACTIVE)+'/aimd='+''.join(str(int(e)) for e in AIMD)+'/multiplier='+''.join(str(int(e)) for e in MULT)+'/alpha='+str(ALPHA)+'/beta='+str(BETA)+'/tau='+str(WAIT_TIME)+'/inbox='+str(MAX_INBOX_LEN)+'/nodes='+str(NUM_NODES)+'/neighbours='+str(NUM_NEIGHBOURS)+'/simtime='+str(SIM_TIME)+'/nmc='+str(MONTE_CARLOS)
     if not Path(dirstr).exists():
         print("Simulating")
         simulate(dirstr)
     else:
         print("Simulation already done for these parameters")
+        simulate(dirstr)
     plot_results(dirstr)
     
 def simulate(dirstr):
@@ -54,11 +66,9 @@ def simulate(dirstr):
     Lmds = []
     InboxLens = []
     SymDiffs = []
-    latencies = []
-    for NodeID in range(NUM_NODES):
-        latencies.append([])
+    latencies = [[] for NodeID in range(NUM_NODES)]
+    IATimes = [[] for NodeID in range(NUM_NODES)]
     for mc in range(MONTE_CARLOS):
-        print(mc)
         """
         Generate network topology:
         Comment out one of the below lines for either random k-regular graph or a
@@ -69,18 +79,16 @@ def simulate(dirstr):
         # Get adjacency matrix and weight by delay at each channel
         ChannelDelays = 0.09*np.ones((NUM_NODES, NUM_NODES))+0.02*np.random.rand(NUM_NODES, NUM_NODES)
         AdjMatrix = np.multiply(1*np.asarray(nx.to_numpy_matrix(G)), ChannelDelays)
-        # Node parameters
-        Lambdas = NU*REP/sum(REP)
-        Nus = NU*(np.ones(NUM_NODES))
-        Net = Network(AdjMatrix, Lambdas, Nus)
+        Net = Network(AdjMatrix)
+        # output arrays
         Lmds.append(np.zeros((TimeSteps, NUM_NODES)))
         InboxLens.append(np.zeros((TimeSteps, NUM_NODES)))
         SymDiffs.append(np.zeros(TimeSteps))
         for i in range(TimeSteps):
+            if 100*i/TimeSteps%10==0:
+                print("Simulation: "+str(mc) +"\t " + str(int(100*i/TimeSteps))+"% Complete")
             # discrete time step size specified by global variable STEP
             T = STEP*i
-            # set issue rate of node 0 to always be zero
-            Net.Nodes[0].Lambda = 0
             """
             The next line is the function which ultimately calls all others
             and runs the simulation for a time step
@@ -88,10 +96,13 @@ def simulate(dirstr):
             Net.simulate(T)
             # save summary results in output arrays
             for Node in Net.Nodes:
-                Lmds[mc][i, Node.NodeID] = Node.Lambda
+                Lmds[mc][i, Node.NodeID] = sum(Node.Lambda)
                 InboxLens[mc][i, Node.NodeID] = len(Net.Nodes[0].Inbox.Packets[Node.NodeID])
             SymDiffs[mc][i] = Net.sym_diffs().max()
         latencies = Net.tran_latency(latencies)
+        for NodeID in range(NUM_NODES):
+            IATimes[NodeID] += np.diff(Net.Nodes[1].ArrivalTimes[NodeID]).tolist()
+            
         del Net
     """
     Get results
@@ -110,6 +121,7 @@ def simulate(dirstr):
     np.savetxt(dirstr+'/avgInboxLen.csv', avgInboxLen, delimiter=',')
     for NodeID in range(NUM_NODES):
         np.savetxt(dirstr+'/latencies'+str(NodeID)+'.csv', np.asarray(latencies[NodeID]), delimiter=',')
+        np.savetxt(dirstr+'/IATimes'+str(NodeID)+'.csv', np.asarray(IATimes[NodeID]), delimiter=',')
     nx.write_adjlist(G, dirstr+'/result_adjlist.txt', delimiter=' ')
     
 def plot_results(dirstr):
@@ -126,23 +138,27 @@ def plot_results(dirstr):
     avgUtil = np.loadtxt(dirstr+'/avgUtil.csv', delimiter=',')
     avgInboxLen = np.loadtxt(dirstr+'/avgInboxLen.csv', delimiter=',')
     latencies = []
+    IATimes = []
+    
     for NodeID in range(NUM_NODES):
         lat = [np.loadtxt(dirstr+'/latencies'+str(NodeID)+'.csv', delimiter=',')]
         if lat:
             latencies.append(lat)
+        IAt = [np.loadtxt(dirstr+'/IATimes'+str(NodeID)+'.csv', delimiter=',')]
+        if IAt:
+            IATimes.append(IAt)
     """
     Plot results
     """
     fig1, ax1 = plt.subplots()
     ax1.set_xlabel('Time')
-    ax1.set_ylabel('Lambda')
+    ax1.set_ylabel('Rate/Baseline')
     ax1.legend(list(map(str, range(NUM_NODES))))
     for i in range(NUM_NODES):
-        ax1.plot(np.arange(0, SIM_TIME, STEP), avgLmds[:,i])
-    for i in range(NUM_NODES):
-        ax1.plot([0, SIM_TIME], [REP[i]*NU/sum(REP), REP[i]*NU/sum(REP)], 'r--')
+        ax1.plot(np.arange(0, SIM_TIME, STEP), avgLmds[:,i]*sum(REP)/(NU*REP[i]))
+    ax1.plot([0, SIM_TIME], [1, 1], 'r--')
     plt.legend(range(NUM_NODES))
-    plt.savefig(dirstr+'/Lambdas.png')
+    plt.savefig(dirstr+'/NormalisedLambdas.png')
     
     fig2, ax2 = plt.subplots()
     ax2.set_xlabel('Time')
@@ -185,6 +201,28 @@ def plot_results(dirstr):
         ax5.plot(bins, cdf)
     plt.legend(range(NUM_NODES))
     plt.savefig(dirstr+'/Latency.png')
+    
+    fig6, ax6 = plt.subplots()
+    maxval = 0
+    for NodeID in range(NUM_NODES):
+        if len(IATimes[NodeID][0])>0:
+            val = np.max(IATimes[NodeID][0])
+        else:
+            val = 0
+        if val>maxval:
+            maxval = val
+    
+    for NodeID in range(len(IATimes)):
+        bins = np.arange(0, round(maxval), STEP)
+        pdf = np.zeros(len(bins))
+        for i, b in enumerate(bins):
+            lats = [lat for lat in IATimes[NodeID][0] if (lat>b and lat<b+STEP)]
+            pdf[i] = len(lats)
+        pdf = pdf/sum(pdf) # normalise
+        cdf = np.cumsum(pdf)
+        ax6.plot(bins, cdf)
+    plt.legend(range(NUM_NODES))
+    plt.savefig(dirstr+'/IATimes.png')
     """
     Draw network graph used in this simulation
     """
@@ -199,11 +237,12 @@ class Transaction:
     """
     Object to simulate a transaction its edges in the DAG
     """
-    def __init__(self, ArrivalTime, Parents, Node):
+    def __init__(self, ArrivalTime, Parents, Node, Index=None):
         self.ArrivalTime = ArrivalTime
         self.IssueTime = []
         self.Children = []
         self.Parents = Parents
+        self.Index = Index
         if Node:
             self.NodeID = Node.NodeID # signature of issuing node
             self.InformedNodes = [Node] # info about who has seen this TX
@@ -215,7 +254,6 @@ class Transaction:
             self.GlobalSolidTime = []
             self.GlobalSolidTime90pc = []
         
-        
     def is_tip(self):
         if not self.Children:
             return True
@@ -226,7 +264,7 @@ class Node:
     """
     Object to simulate an IOTA full node
     """
-    def __init__(self, Network, Lambda, Nu, NodeID, Genesis, PoWDelay = 1):
+    def __init__(self, Network, NodeID, Genesis, PoWDelay = 1):
         self.TipsSet = [Genesis]
         self.Ledger = [Genesis]
         self.TempTransactions = []
@@ -234,22 +272,25 @@ class Node:
         self.Neighbours = []
         self.Network = Network
         self.Inbox = Inbox()
-        self.Lambda = Lambda
-        self.Nu = Nu
         self.NodeID = NodeID
-        self.Alpha = ALPHA*REP[self.NodeID]/sum(REP)
-        self.BackOff = []
-        self.LastBackOff = []
-        self.LastCongestion = []
+        self.Alpha = ALPHA*1/sum(REP)
+        self.Lambda = [NU*1/sum(REP) for rep in range(REP[NodeID])]
+        self.BackOff = [[] for rep in range(REP[NodeID])]
+        self.LastBackOff = [[] for rep in range(REP[NodeID])]
+        self.ArrivalTimes = [[] for NodeID in range(NUM_NODES)]
         
-    def generate_txs(self, Time):
+    def generate_txs(self, Time, Index):
         """
         Create new TXs at rate lambda and do PoW
         """
-        NewTXs = np.sort(np.random.uniform(Time, Time+STEP, np.random.poisson(STEP*self.Lambda)))
+        if ACTIVE[self.NodeID]:
+            NewTXs = np.sort(np.random.uniform(Time, Time+STEP, np.random.poisson(STEP*self.Lambda[Index])))
+        else:
+            NewTXs = []
+            self.Lambda[Index] = 0
         for t in NewTXs:
             Parents = self.select_tips()
-            self.TempTransactions.append(Transaction(t, Parents, self))
+            self.TempTransactions.append(Transaction(t, Parents, self, Index))
         # check PoW completion
         if self.TempTransactions:
             for Tran in self.TempTransactions:
@@ -279,14 +320,24 @@ class Node:
         for NodeID in range(NUM_NODES):
             self.Inbox.Packets[NodeID].sort(key=lambda p: p.EndTime)
         # process according to global rate Nu
-        nTX = np.random.poisson(STEP*self.Nu)
+        nTX = np.random.poisson(STEP*NU)
         times = np.sort(np.random.uniform(Time, Time+STEP, nTX))
         i = 0
         while i < nTX:
-            if SCHEDULING=='tokenbucket':
+            if SCHEDULING=='fifo':
+                Packet = self.Inbox.fifo_schedule(Time)
+            elif SCHEDULING=='aimd':
+                Packet = self.Inbox.aimd_schedule(Time)
+            elif SCHEDULING=='tokenbucket':
                 Packet = self.Inbox.token_bucket_schedule(Time)
             elif SCHEDULING=='wrr':
                 Packet = self.Inbox.wrr_schedule(Time)
+            elif SCHEDULING=='brr':
+                Packet = self.Inbox.brr_schedule(Time)
+            elif SCHEDULING=='drr':
+                Packet = self.Inbox.drr_schedule()
+            elif SCHEDULING=='bob':
+                Packet = self.Inbox.bob_schedule(Time)
             if Packet is not None:
                 if Packet.Data not in self.Ledger:
                     self.add_to_ledger(Packet.TxNode, Packet.Data, times[i])
@@ -324,30 +375,30 @@ class Node:
         Check if congestion is occurring
         """
         if self.Inbox.AllPackets:
-            if len(self.Inbox.Packets[self.NodeID])>MAX_INBOX_LEN*REP[self.NodeID]:
-                # ignore it if recently backed off
-                if self.LastCongestion:
-                    if Time < self.LastCongestion + WAIT_TIME:
-                        return
-                    
-                self.LastCongestion = Time
-                self.BackOff = True
+            for i in range(REP[self.NodeID]):
+                Packets = [p for p in self.Inbox.Packets[self.NodeID] if p.Data.Index==i]
+                if len(Packets)>MAX_INBOX_LEN:
+                    self.BackOff[i] = True
             
-    def aimd_update(self, Time):
+    def set_rate(self, Time):
         """
         Additively increase or multiplicatively decrease lambda
         """
-        # if wait time has not passed---reset.
-        if self.LastBackOff:
-            if Time < self.LastBackOff + WAIT_TIME:
-                self.BackOff = False
-                return
-        # multiplicative decrease or else additive increase
-        if self.BackOff:
-            self.Lambda = self.Lambda*BETA
-            self.LastBackOff = Time
-        else:
-            self.Lambda += self.Alpha*STEP
+        for i in range(REP[self.NodeID]):
+            if AIMD[self.NodeID] and Time>=60: # AIMD starts after 1 min adjustment
+                # if wait time has not passed---reset.
+                if self.LastBackOff[i]:
+                    if Time < self.LastBackOff[i] + WAIT_TIME:
+                        self.BackOff[i] = False
+                        continue
+                # multiplicative decrease or else additive increase
+                if self.BackOff[i]:
+                    self.Lambda[i] = self.Lambda[i]*BETA
+                    self.LastBackOff[i] = Time
+                else:
+                    self.Lambda[i] += MULT[self.NodeID]*self.Alpha*STEP
+            else:
+                self.Lambda[i] = MULT[self.NodeID]*NU*1/sum(REP)
             
     def add_to_inbox(self, Packet):
         """
@@ -358,6 +409,7 @@ class Node:
                 self.Inbox.AllPackets.append(Packet)
                 self.Inbox.Packets[Packet.Data.NodeID].append(Packet)
                 self.Inbox.Trans.append(Packet.Data)
+                self.ArrivalTimes[Packet.Data.NodeID].append(Packet.EndTime)
         
     
                 
@@ -366,12 +418,19 @@ class Inbox:
     Object for holding packets in different channels corresponding to different nodes
     """
     def __init__(self):
-        self.AllPackets = []
-        self.Packets = []
+        self.AllPackets = [] # Inbox_m
+        self.Packets = [] # Inbox_m(i)
+        self.Credits = np.zeros(NUM_NODES)
         for NodeID in range(NUM_NODES):
             self.Packets.append([])
+            self.Credits[NodeID] += REP[NodeID]
         self.Trans = []
         self.Priority = np.zeros(NUM_NODES)
+        self.Buffer = []
+        self.RRSlot = 0
+        self.RRNodeID = 0
+        self.Deficit = np.zeros(NUM_NODES)
+        
        
     def remove_packet(self, Packet):
         """
@@ -383,6 +442,41 @@ class Inbox:
                 self.Packets[Packet.Data.NodeID].remove(Packet)
                 self.Trans.remove(Packet.Data)
     
+    def fifo_schedule(self, Time):
+        if self.AllPackets:
+            Packet = self.AllPackets[0]
+            # remove the transaction from all inboxes
+            self.remove_packet(Packet)
+            return Packet
+    
+    def aimd_schedule(self, Time):
+        if self.AllPackets:
+            # update priority of inbox channels
+            for NodeID in range(NUM_NODES):
+                self.Priority[NodeID] = min(self.Priority[NodeID]+REP[NodeID], MAX_BURST*sum(REP))
+            # First sort by priority
+            PriorityOrder = sorted(range(NUM_NODES), key=lambda k: self.Priority[k], reverse=True)
+            # take highest priority nonempty queue with oldest tx
+            EarliestTime = Time
+            HighestPriority = -float('Inf')
+            for NodeID in PriorityOrder:
+                if self.Packets[NodeID]:
+                    Priority = self.Priority[NodeID]
+                    if Priority>=HighestPriority:
+                        HighestPriority = Priority
+                        ArrivalTime = self.Packets[NodeID][0].EndTime
+                        if ArrivalTime<=EarliestTime:
+                            EarliestTime = ArrivalTime
+                            BestNodeID = NodeID
+                    else:
+                        break
+            Packet = self.Packets[BestNodeID][0]
+            # reduce priority multiplicatively
+            self.Priority[BestNodeID] = 0.5*self.Priority[BestNodeID]
+            # remove the transaction from all inboxes
+            self.remove_packet(Packet)
+            return Packet
+        
     def token_bucket_schedule(self, Time):
         if self.AllPackets:
             # update priority of inbox channels
@@ -406,23 +500,60 @@ class Inbox:
                         break
             Packet = self.Packets[BestNodeID][0]
             # reduce priority of the inbox channel by total rep amount or to zero
-            if self.Priority[BestNodeID]>sum(REP):
-                self.Priority[BestNodeID] -= sum(REP)
-            else:
-                self.Priority[BestNodeID] = 0
+            self.Priority[BestNodeID] = max(self.Priority[BestNodeID]-sum(REP), 0)
             # remove the transaction from all inboxes
             self.remove_packet(Packet)
             return Packet
 
     def wrr_schedule(self, Time):
         if self.AllPackets:
-            population = [NodeID for NodeID in range(NUM_NODES) if self.Packets[NodeID]]
-            reps = [REP[NodeID] for NodeID in population]
-            NodeID = np.random.choice(population, p=reps/sum(reps))
-            Packet = self.Packets[NodeID][0]
-            # remove the transaction from all inboxes
-            self.remove_packet(Packet)
-            return Packet
+            while True:
+                if self.Packets[self.RRNodeID]:
+                    Packet = self.Packets[self.RRNodeID][0]
+                    self.RRSlot += 1
+                    if self.RRSlot >= REP[self.RRNodeID]:
+                        self.RRNodeID = (self.RRNodeID+1)%NUM_NODES
+                        self.RRSlot = 0
+                    # remove the transaction from all inboxes
+                    self.remove_packet(Packet)
+                    return Packet
+                else: # move to next node's first slot
+                    self.RRNodeID = (self.RRNodeID+1)%NUM_NODES
+                    self.RRSlot = 0
+                
+    def brr_schedule(self, Time):
+        population = [NodeID for NodeID in range(NUM_NODES) if ACTIVE[NodeID]]
+        while population:
+            creds = [self.Credits[NodeID] for NodeID in population]
+            NodeID = np.random.choice(population, p=creds/sum(creds))
+            if self.Packets[NodeID]:
+                self.Credits[NodeID] = REP[NodeID]
+                Packet = self.Packets[NodeID][0]# remove the transaction from all inboxes
+                self.remove_packet(Packet)
+                return Packet
+            else:
+                self.Credits[NodeID] += 1
+                population.remove(NodeID)
+            
+        
+    def drr_schedule(self):
+        if self.AllPackets:
+            while True:
+                if self.RRSlot >= REP[self.RRNodeID]:
+                    self.RRNodeID = (self.RRNodeID+1)%NUM_NODES
+                    self.RRSlot = 0
+                if self.Packets[self.RRNodeID]:
+                    Packet = self.Packets[self.RRNodeID][0]
+                    if self.Deficit[self.RRNodeID]:
+                        self.Deficit[self.RRNodeID] -= 1
+                    else:
+                        self.RRSlot += 1
+                    # remove the transaction from all inboxes
+                    self.remove_packet(Packet)
+                    return Packet
+                else: # move to next node's first slot
+                    self.RRSlot += 1
+                    self.Deficit[self.RRNodeID] = min(self.Deficit[self.RRNodeID]+1, MAX_BURST*REP[self.RRNodeID]) # limited deficit savings
 
 class Packet:
     """
@@ -485,15 +616,14 @@ class Network:
     """
     Object containing all nodes and their interconnections
     """
-    def __init__(self, AdjMatrix, Lambdas, Nus):
+    def __init__(self, AdjMatrix):
         self.A = AdjMatrix
-        self.Lambdas = Lambdas
         self.Nodes = []
         self.CommChannels = []
         Genesis = Transaction(0, [], [])
         # Create nodes
         for i in range(np.size(self.A,1)):
-            self.Nodes.append(Node(self, Lambdas[i], Nus[i], i, Genesis))
+            self.Nodes.append(Node(self, i, Genesis))
         # Add neighbours and create list of comm channels corresponding to each node
         for i in range(np.size(self.A,1)):
             RowList = []
@@ -525,16 +655,17 @@ class Network:
         Each node generate and process new transactions
         """
         for Node in self.Nodes:
-            Node.generate_txs(Time)
+            for i in range(REP[Node.NodeID]):
+                Node.generate_txs(Time, i)
             Node.process_inbox(Time)
             Node.check_congestion(Time)
-            Node.aimd_update(Time)
+            Node.set_rate(Time)
         """
         Move packets through all comm channels
         """
         for CCs in self.CommChannels:
             for CC in CCs:
-                CC.transmit_packets(Time)
+                CC.transmit_packets(Time+STEP)
     
     def sym_diffs(self):
         SymDiffs = np.zeros((NUM_NODES, NUM_NODES))
