@@ -11,7 +11,7 @@ from pathlib import Path
 
 # Simulation Parameters
 MONTE_CARLOS = 1
-SIM_TIME = 1800
+SIM_TIME = 1200
 STEP = 0.1
 # Network Parameters
 NU = 10
@@ -39,10 +39,10 @@ MULT[4] = 4
 AIMD[4] = 0
 '''
 # AIMD Parameters
-ALPHA = 0.003*NU
+ALPHA = 0.002*NU
 BETA = 0.8
 WAIT_TIME = 20
-MAX_INBOX_LEN = 5 # worst case number of TXs that empty each second
+MAX_INBOX_LEN = 2
 MAX_BURST = 10
 
 SCHEDULING = 'drr'
@@ -51,7 +51,7 @@ def main():
     '''
     Create directory for storing results with these parameters
     '''
-    dirstr = 'data/scheduling='+SCHEDULING+'/maxburst='+str(MAX_BURST)+'/nu='+str(NU)+'/rep='+''.join(str(int(e)) for e in REP)+'/active='+''.join(str(int(e)) for e in ACTIVE)+'/aimd='+''.join(str(int(e)) for e in AIMD)+'/multiplier='+''.join(str(int(e)) for e in MULT)+'/alpha='+str(ALPHA)+'/beta='+str(BETA)+'/tau='+str(WAIT_TIME)+'/inbox='+str(MAX_INBOX_LEN)+'/nodes='+str(NUM_NODES)+'/neighbours='+str(NUM_NEIGHBOURS)+'/simtime='+str(SIM_TIME)+'/nmc='+str(MONTE_CARLOS)
+    dirstr = 'data/sched='+SCHEDULING+'/dmax='+str(MAX_BURST)+'/nu='+str(NU)+'/rep='+''.join(str(int(e)) for e in REP)+'/active='+''.join(str(int(e)) for e in ACTIVE)+'/aimd='+''.join(str(int(e)) for e in AIMD)+'/alpha='+str(ALPHA)+'/beta='+str(BETA)+'/tau='+str(WAIT_TIME)+'/inbox='+str(MAX_INBOX_LEN)+'/neighbours='+str(NUM_NEIGHBOURS)+'/simtime='+str(SIM_TIME)+'/nmc='+str(MONTE_CARLOS)
     if not Path(dirstr).exists():
         print("Simulating")
         simulate(dirstr)
@@ -86,7 +86,7 @@ def simulate(dirstr):
         G = nx.random_regular_graph(NUM_NEIGHBOURS, NUM_NODES)
         #G = nx.read_adjlist('input_adjlist.txt', delimiter=' ')
         # Get adjacency matrix and weight by delay at each channel
-        ChannelDelays = 0.09*np.ones((NUM_NODES, NUM_NODES))+0.02*np.random.rand(NUM_NODES, NUM_NODES)
+        ChannelDelays = 0.05*np.ones((NUM_NODES, NUM_NODES))+0.1*np.random.rand(NUM_NODES, NUM_NODES)
         AdjMatrix = np.multiply(1*np.asarray(nx.to_numpy_matrix(G)), ChannelDelays)
         Net = Network(AdjMatrix)
         # output arrays
@@ -106,7 +106,7 @@ def simulate(dirstr):
             Net.simulate(T)
             # save summary results in output arrays
             for Node in Net.Nodes:
-                Lmds[mc][i, Node.NodeID] = sum(Node.Lambda)
+                Lmds[mc][i, Node.NodeID] = Node.Lambda
                 InboxLens[mc][i, Node.NodeID] = len(Net.Nodes[0].Inbox.Packets[Node.NodeID])
                 Deficits[mc][i, Node.NodeID] = Net.Nodes[0].Inbox.Deficit[Node.NodeID]
             SymDiffs[mc][i] = Net.sym_diffs().max()
@@ -175,9 +175,19 @@ def plot_results(dirstr):
     for NodeID in range(NUM_NODES):
         if ACTIVE[NodeID]:
             if AIMD[NodeID]:
-                ax1.plot(np.arange(0, SIM_TIME, STEP), avgLmds[:,NodeID]*sum(REP)/(NU*REP[NodeID]), linewidth=0.5, marker='o', markevery=500)
+                if REP[NodeID]==3:
+                    ax1.plot(np.arange(0, SIM_TIME, STEP), avgLmds[:,NodeID]*sum(REP)/(NU*REP[NodeID]), linewidth=0.5, marker='o', markevery=100, color='red')
+                if REP[NodeID]==2:
+                    ax1.plot(np.arange(0, SIM_TIME, STEP), avgLmds[:,NodeID]*sum(REP)/(NU*REP[NodeID]), linewidth=0.5, marker='o', markevery=100, color='green')
+                if REP[NodeID]==1:
+                    ax1.plot(np.arange(0, SIM_TIME, STEP), avgLmds[:,NodeID]*sum(REP)/(NU*REP[NodeID]), linewidth=0.5, marker='o', markevery=100, color='blue')
             else:
-                ax1.plot(np.arange(0, SIM_TIME, STEP), avgLmds[:,NodeID]*sum(REP)/(NU*REP[NodeID]), linewidth=0.5, marker='x', markevery=500)
+                if REP[NodeID]==3:
+                    ax1.plot(np.arange(0, SIM_TIME, STEP), avgLmds[:,NodeID]*sum(REP)/(NU*REP[NodeID]), linewidth=0.5, marker='x', markevery=100, color='red')
+                if REP[NodeID]==2:
+                    ax1.plot(np.arange(0, SIM_TIME, STEP), avgLmds[:,NodeID]*sum(REP)/(NU*REP[NodeID]), linewidth=0.5, marker='x', markevery=100, color='green')
+                if REP[NodeID]==1:
+                    ax1.plot(np.arange(0, SIM_TIME, STEP), avgLmds[:,NodeID]*sum(REP)/(NU*REP[NodeID]), linewidth=0.5, marker='x', markevery=100, color='blue')
     #ax1.plot([0, SIM_TIME], [1, 1], 'r--'))
     plt.savefig(dirstr+'/NormalisedLambdas.png')
     
@@ -200,6 +210,13 @@ def plot_results(dirstr):
     ax4.plot(np.arange(0, SIM_TIME, STEP), avgDefs)
     plt.legend(range(NUM_NODES))
     plt.savefig(dirstr+'/Deficits.png')
+    
+    fig4, ax4 = plt.subplots()
+    ax4.set_xlabel('Time')
+    ax4.set_ylabel('Inbox length at Node 0')
+    ax4.plot(np.arange(0, SIM_TIME, STEP), avgInboxLen)
+    plt.legend(range(NUM_NODES))
+    plt.savefig(dirstr+'/Inbox.png')
     
     fig5, ax5 = plt.subplots()
     maxval = 0
@@ -296,32 +313,32 @@ class Node:
         self.Network = Network
         self.Inbox = Inbox()
         self.NodeID = NodeID
-        self.Alpha = ALPHA*1/sum(REP)
-        self.Lambda = [NU*1/sum(REP) for rep in range(REP[NodeID])]
-        self.BackOff = [[] for rep in range(REP[NodeID])]
-        self.LastBackOff = [[] for rep in range(REP[NodeID])]
-        self.LastIssueTime = [[] for rep in range(REP[NodeID])]
+        self.Alpha = ALPHA*REP[NodeID]/sum(REP)
+        self.Lambda = NU*REP[NodeID]/sum(REP)
+        self.BackOff = []
+        self.LastBackOff = []
+        self.LastIssueTime = []
         self.ArrivalTimes = [[] for NodeID in range(NUM_NODES)]
         self.LastWriteTime = 0
         
-    def generate_txs(self, Time, Index):
+    def generate_txs(self, Time):
         """
         Create new TXs at rate lambda and do PoW
         """
         if ACTIVE[self.NodeID]:
             if TOKEN_BUCKET[self.NodeID]:
                 NewTXs = []
-                while self.LastIssueTime[Index]+(1/self.Lambda[Index])<Time+STEP:
-                    NewTXs.append(self.LastIssueTime[Index+(1/self.Lambda[Index]))
-                    self.LastIssueTime[Index] += 1/self.Lambda[Index]
+                while self.LastIssueTime+(1/self.Lambda)<Time+STEP:
+                    NewTXs.append(self.LastIssueTime+(1/self.Lambda))
+                    self.LastIssueTime += 1/self.Lambda
             else:
-                NewTXs = np.sort(np.random.uniform(Time, Time+STEP, np.random.poisson(STEP*self.Lambda[Index])))
+                NewTXs = np.sort(np.random.uniform(Time, Time+STEP, np.random.poisson(STEP*self.Lambda)))
         else:
             NewTXs = []
-            self.Lambda[Index] = 0
+            self.Lambda = 0
         for t in NewTXs:
             Parents = self.select_tips()
-            self.TempTransactions.append(Transaction(t, Parents, self, Index))
+            self.TempTransactions.append(Transaction(t, Parents, self))
         # check PoW completion
         if self.TempTransactions:
             for Tran in self.TempTransactions:
@@ -354,7 +371,7 @@ class Node:
         #nTX = np.random.poisson(STEP*NU)
         #times = np.sort(np.random.uniform(Time, Time+STEP, nTX))
         #i = 0
-        while self.LastWriteTime+1/NU<Time+STEP:
+        while self.LastWriteTime+(1/NU)<Time+STEP:
             if SCHEDULING=='fifo':
                 Packet = self.Inbox.fifo_schedule(Time)
             elif SCHEDULING=='aimd':
@@ -371,7 +388,7 @@ class Node:
                 Packet = self.Inbox.bob_schedule(Time)
             if Packet is not None:
                 if Packet.Data not in self.Ledger:
-                    self.add_to_ledger(Packet.TxNode, Packet.Data, self.LastWriteTime+1/NU)
+                    self.add_to_ledger(Packet.TxNode, Packet.Data, self.LastWriteTime+(1/NU))
                 self.LastWriteTime += 1/NU
             else:
                 break
@@ -406,31 +423,28 @@ class Node:
         Check if congestion is occurring
         """
         if self.Inbox.AllPackets:
-            for i in range(REP[self.NodeID]):
-                Packets = [p for p in self.Inbox.Packets[self.NodeID] if p.Data.Index==i]
-                if len(Packets)>MAX_INBOX_LEN:
-                    self.BackOff[i] = True
+            if len(self.Inbox.Packets[self.NodeID])>MAX_INBOX_LEN*REP[self.NodeID]:
+                self.BackOff = True
             
     def set_rate(self, Time):
         """
         Additively increase or multiplicatively decrease lambda
         """
-        for i in range(REP[self.NodeID]):
-            if ACTIVE[self.NodeID]:
-                if AIMD[self.NodeID] and Time>=60: # AIMD starts after 1 min adjustment
-                    # if wait time has not passed---reset.
-                    if self.LastBackOff[i]:
-                        if Time < self.LastBackOff[i] + WAIT_TIME:
-                            self.BackOff[i] = False
-                            continue
-                    # multiplicative decrease or else additive increase
-                    if self.BackOff[i]:
-                        self.Lambda[i] = self.Lambda[i]*BETA
-                        self.LastBackOff[i] = Time
-                    else:
-                        self.Lambda[i] += MULT[self.NodeID]*self.Alpha*STEP
+        if ACTIVE[self.NodeID]:
+            if AIMD[self.NodeID] and Time>=60: # AIMD starts after 1 min adjustment
+                # if wait time has not passed---reset.
+                if self.LastBackOff:
+                    if Time < self.LastBackOff + WAIT_TIME:
+                        self.BackOff = False
+                        return
+                # multiplicative decrease or else additive increase
+                if self.BackOff:
+                    self.Lambda = self.Lambda*BETA
+                    self.LastBackOff = Time
                 else:
-                    self.Lambda[i] = MULT[self.NodeID]*NU*1/sum(REP)
+                    self.Lambda += MULT[self.NodeID]*self.Alpha*STEP
+            else:
+                self.Lambda = MULT[self.NodeID]*NU*REP[self.NodeID]/sum(REP)
             
     def add_to_inbox(self, Packet):
         """
@@ -687,8 +701,7 @@ class Network:
         Each node generate and process new transactions
         """
         for Node in self.Nodes:
-            for i in range(REP[Node.NodeID]):
-                Node.generate_txs(Time, i)
+            Node.generate_txs(Time)
             Node.schedule_txs(Time)
             Node.check_congestion(Time)
             Node.set_rate(Time)
