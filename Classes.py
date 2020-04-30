@@ -4,40 +4,48 @@ Created on Fri Sep 27 22:28:39 2019
 """
 import numpy as np
 import matplotlib.pyplot as plt
+import matplotlib.lines as mlines
 import networkx as nx
 from random import sample
 from pathlib import Path
 
 # Simulation Parameters
-MONTE_CARLOS = 10
-SIM_TIME = 1200
+MONTE_CARLOS = 1
+SIM_TIME = 1800
 STEP = 0.1
 # Network Parameters
-NU = 5
-NUM_NODES = 10
+NU = 10
+NUM_NODES = 15
 NUM_NEIGHBOURS = 4
+TOKEN_BUCKET = np.zeros(NUM_NODES, dtype=bool)
 REP = np.ones(NUM_NODES, dtype=int)
-REP[0] = 9
-REP[1] = 7
-REP[2] = 5
-REP[3] = 3
-MAX_BURST = 10
-AIMD = np.ones(NUM_NODES)
+AIMD = np.zeros(NUM_NODES, dtype=bool)
+ACTIVE = np.ones(NUM_NODES, dtype=bool)
+REP[0] = 3
+REP[1] = 2
+REP[5] = 3
+REP[6] = 2
+REP[10] = 3
+REP[11] = 2
+
+# first five nodes inactive
+ACTIVE[0:5] = False
+# last five nodes opportunistic
+AIMD[10:15] = True
 MULT = np.ones(NUM_NODES)
-ACTIVE = np.ones(NUM_NODES)
-ACTIVE[0] = 0
 '''
 # dishonest node
 MULT[4] = 4
 AIMD[4] = 0
 '''
 # AIMD Parameters
-ALPHA = 0.002*NU
+ALPHA = 0.003*NU
 BETA = 0.8
 WAIT_TIME = 20
 MAX_INBOX_LEN = 5 # worst case number of TXs that empty each second
+MAX_BURST = 10
 
-SCHEDULING = 'aimd'
+SCHEDULING = 'drr'
     
 def main():
     '''
@@ -49,7 +57,7 @@ def main():
         simulate(dirstr)
     else:
         print("Simulation already done for these parameters")
-        simulate(dirstr)
+        #simulate(dirstr)
     plot_results(dirstr)
     
 def simulate(dirstr):
@@ -65,6 +73,7 @@ def simulate(dirstr):
     """
     Lmds = []
     InboxLens = []
+    Deficits = []
     SymDiffs = []
     latencies = [[] for NodeID in range(NUM_NODES)]
     IATimes = [[] for NodeID in range(NUM_NODES)]
@@ -83,6 +92,7 @@ def simulate(dirstr):
         # output arrays
         Lmds.append(np.zeros((TimeSteps, NUM_NODES)))
         InboxLens.append(np.zeros((TimeSteps, NUM_NODES)))
+        Deficits.append(np.zeros((TimeSteps, NUM_NODES)))
         SymDiffs.append(np.zeros(TimeSteps))
         for i in range(TimeSteps):
             if 100*i/TimeSteps%10==0:
@@ -98,6 +108,7 @@ def simulate(dirstr):
             for Node in Net.Nodes:
                 Lmds[mc][i, Node.NodeID] = sum(Node.Lambda)
                 InboxLens[mc][i, Node.NodeID] = len(Net.Nodes[0].Inbox.Packets[Node.NodeID])
+                Deficits[mc][i, Node.NodeID] = Net.Nodes[0].Inbox.Deficit[Node.NodeID]
             SymDiffs[mc][i] = Net.sym_diffs().max()
         latencies = Net.tran_latency(latencies)
         for NodeID in range(NUM_NODES):
@@ -110,6 +121,7 @@ def simulate(dirstr):
     avgLmds = sum(Lmds)/len(Lmds)
     avgUtil = 100*np.sum(avgLmds, axis=1)/NU
     avgInboxLen = sum(InboxLens)/len(InboxLens)
+    avgDefs = sum(Deficits)/len(Deficits)
     avgMSDs = sum(SymDiffs)/len(SymDiffs)
     """
     Create a directory for these results and save them
@@ -119,6 +131,7 @@ def simulate(dirstr):
     np.savetxt(dirstr+'/avgLmds.csv', avgLmds, delimiter=',')
     np.savetxt(dirstr+'/avgUtil.csv', avgUtil, delimiter=',')
     np.savetxt(dirstr+'/avgInboxLen.csv', avgInboxLen, delimiter=',')
+    np.savetxt(dirstr+'/avgDefs.csv', avgDefs, delimiter=',')
     for NodeID in range(NUM_NODES):
         np.savetxt(dirstr+'/latencies'+str(NodeID)+'.csv', np.asarray(latencies[NodeID]), delimiter=',')
         np.savetxt(dirstr+'/IATimes'+str(NodeID)+'.csv', np.asarray(IATimes[NodeID]), delimiter=',')
@@ -137,6 +150,7 @@ def plot_results(dirstr):
     avgLmds = np.loadtxt(dirstr+'/avgLmds.csv', delimiter=',')
     avgUtil = np.loadtxt(dirstr+'/avgUtil.csv', delimiter=',')
     avgInboxLen = np.loadtxt(dirstr+'/avgInboxLen.csv', delimiter=',')
+    avgDefs = np.loadtxt(dirstr+'/avgDefs.csv', delimiter=',')
     latencies = []
     IATimes = []
     
@@ -152,12 +166,19 @@ def plot_results(dirstr):
     """
     fig1, ax1 = plt.subplots()
     ax1.set_xlabel('Time')
-    ax1.set_ylabel('Rate/Baseline')
-    ax1.legend(list(map(str, range(NUM_NODES))))
-    for i in range(NUM_NODES):
-        ax1.plot(np.arange(0, SIM_TIME, STEP), avgLmds[:,i]*sum(REP)/(NU*REP[i]))
-    ax1.plot([0, SIM_TIME], [1, 1], 'r--')
-    plt.legend(range(NUM_NODES))
+    ax1.set_ylabel(r'${\lambda}/{\~{\lambda}}$')
+    opp = mlines.Line2D([], [], color='black', marker='o', linestyle='None',
+                          markersize=15, label='Opportunistic')
+    cont = mlines.Line2D([], [], color='black', marker='x', linestyle='None',
+                          markersize=15, label='Content')
+    ax1.legend(handles=[opp, cont])
+    for NodeID in range(NUM_NODES):
+        if ACTIVE[NodeID]:
+            if AIMD[NodeID]:
+                ax1.plot(np.arange(0, SIM_TIME, STEP), avgLmds[:,NodeID]*sum(REP)/(NU*REP[NodeID]), linewidth=0.5, marker='o', markevery=500)
+            else:
+                ax1.plot(np.arange(0, SIM_TIME, STEP), avgLmds[:,NodeID]*sum(REP)/(NU*REP[NodeID]), linewidth=0.5, marker='x', markevery=500)
+    #ax1.plot([0, SIM_TIME], [1, 1], 'r--'))
     plt.savefig(dirstr+'/NormalisedLambdas.png')
     
     fig2, ax2 = plt.subplots()
@@ -175,10 +196,10 @@ def plot_results(dirstr):
     
     fig4, ax4 = plt.subplots()
     ax4.set_xlabel('Time')
-    ax4.set_ylabel('Inbox Length')
-    ax4.plot(np.arange(0, SIM_TIME, STEP), avgInboxLen)
+    ax4.set_ylabel('Deficits at Node 0')
+    ax4.plot(np.arange(0, SIM_TIME, STEP), avgDefs)
     plt.legend(range(NUM_NODES))
-    plt.savefig(dirstr+'/Inbox.png')
+    plt.savefig(dirstr+'/Deficits.png')
     
     fig5, ax5 = plt.subplots()
     maxval = 0
@@ -191,14 +212,15 @@ def plot_results(dirstr):
             maxval = val
     
     for NodeID in range(len(latencies)):
-        bins = np.arange(0, round(maxval), STEP)
-        pdf = np.zeros(len(bins))
-        for i, b in enumerate(bins):
-            lats = [lat for lat in latencies[NodeID][0] if (lat>b and lat<b+STEP)]
-            pdf[i] = len(lats)
-        pdf = pdf/sum(pdf) # normalise
-        cdf = np.cumsum(pdf)
-        ax5.plot(bins, cdf)
+        if ACTIVE[NodeID]:
+            bins = np.arange(0, round(maxval), STEP)
+            pdf = np.zeros(len(bins))
+            for i, b in enumerate(bins):
+                lats = [lat for lat in latencies[NodeID][0] if (lat>b and lat<b+STEP)]
+                pdf[i] = len(lats)
+            pdf = pdf/sum(pdf) # normalise
+            cdf = np.cumsum(pdf)
+            ax5.plot(bins, cdf)
     plt.legend(range(NUM_NODES))
     plt.savefig(dirstr+'/Latency.png')
     
@@ -213,14 +235,15 @@ def plot_results(dirstr):
             maxval = val
     
     for NodeID in range(len(IATimes)):
-        bins = np.arange(0, round(maxval), STEP)
-        pdf = np.zeros(len(bins))
-        for i, b in enumerate(bins):
-            lats = [lat for lat in IATimes[NodeID][0] if (lat>b and lat<b+STEP)]
-            pdf[i] = len(lats)
-        pdf = pdf/sum(pdf) # normalise
-        cdf = np.cumsum(pdf)
-        ax6.plot(bins, cdf)
+        if ACTIVE[NodeID]:
+            bins = np.arange(0, round(maxval), STEP)
+            pdf = np.zeros(len(bins))
+            for i, b in enumerate(bins):
+                lats = [lat for lat in IATimes[NodeID][0] if (lat>b and lat<b+STEP)]
+                pdf[i] = len(lats)
+            pdf = pdf/sum(pdf) # normalise
+            cdf = np.cumsum(pdf)
+            ax6.plot(bins, cdf)
     plt.legend(range(NUM_NODES))
     plt.savefig(dirstr+'/IATimes.png')
     """
@@ -277,14 +300,22 @@ class Node:
         self.Lambda = [NU*1/sum(REP) for rep in range(REP[NodeID])]
         self.BackOff = [[] for rep in range(REP[NodeID])]
         self.LastBackOff = [[] for rep in range(REP[NodeID])]
+        self.LastIssueTime = [[] for rep in range(REP[NodeID])]
         self.ArrivalTimes = [[] for NodeID in range(NUM_NODES)]
+        self.LastWriteTime = 0
         
     def generate_txs(self, Time, Index):
         """
         Create new TXs at rate lambda and do PoW
         """
         if ACTIVE[self.NodeID]:
-            NewTXs = np.sort(np.random.uniform(Time, Time+STEP, np.random.poisson(STEP*self.Lambda[Index])))
+            if TOKEN_BUCKET[self.NodeID]:
+                NewTXs = []
+                while self.LastIssueTime[Index]+(1/self.Lambda[Index])<Time+STEP:
+                    NewTXs.append(self.LastIssueTime[Index+(1/self.Lambda[Index]))
+                    self.LastIssueTime[Index] += 1/self.Lambda[Index]
+            else:
+                NewTXs = np.sort(np.random.uniform(Time, Time+STEP, np.random.poisson(STEP*self.Lambda[Index])))
         else:
             NewTXs = []
             self.Lambda[Index] = 0
@@ -312,18 +343,18 @@ class Node:
             Selection = self.Ledger[-2:-1]
         return Selection
     
-    def process_inbox(self, Time):
+    def schedule_txs(self, Time):
         """
-        Process TXs in inbox of TXs received from neighbours
+        schedule txs from inbox at a fixed deterministic rate NU
         """
         # sort inboxes by arrival time
         for NodeID in range(NUM_NODES):
             self.Inbox.Packets[NodeID].sort(key=lambda p: p.EndTime)
         # process according to global rate Nu
-        nTX = np.random.poisson(STEP*NU)
-        times = np.sort(np.random.uniform(Time, Time+STEP, nTX))
-        i = 0
-        while i < nTX:
+        #nTX = np.random.poisson(STEP*NU)
+        #times = np.sort(np.random.uniform(Time, Time+STEP, nTX))
+        #i = 0
+        while self.LastWriteTime+1/NU<Time+STEP:
             if SCHEDULING=='fifo':
                 Packet = self.Inbox.fifo_schedule(Time)
             elif SCHEDULING=='aimd':
@@ -340,8 +371,8 @@ class Node:
                 Packet = self.Inbox.bob_schedule(Time)
             if Packet is not None:
                 if Packet.Data not in self.Ledger:
-                    self.add_to_ledger(Packet.TxNode, Packet.Data, times[i])
-                i += 1
+                    self.add_to_ledger(Packet.TxNode, Packet.Data, self.LastWriteTime+1/NU)
+                self.LastWriteTime += 1/NU
             else:
                 break
     
@@ -385,20 +416,21 @@ class Node:
         Additively increase or multiplicatively decrease lambda
         """
         for i in range(REP[self.NodeID]):
-            if AIMD[self.NodeID] and Time>=60: # AIMD starts after 1 min adjustment
-                # if wait time has not passed---reset.
-                if self.LastBackOff[i]:
-                    if Time < self.LastBackOff[i] + WAIT_TIME:
-                        self.BackOff[i] = False
-                        continue
-                # multiplicative decrease or else additive increase
-                if self.BackOff[i]:
-                    self.Lambda[i] = self.Lambda[i]*BETA
-                    self.LastBackOff[i] = Time
+            if ACTIVE[self.NodeID]:
+                if AIMD[self.NodeID] and Time>=60: # AIMD starts after 1 min adjustment
+                    # if wait time has not passed---reset.
+                    if self.LastBackOff[i]:
+                        if Time < self.LastBackOff[i] + WAIT_TIME:
+                            self.BackOff[i] = False
+                            continue
+                    # multiplicative decrease or else additive increase
+                    if self.BackOff[i]:
+                        self.Lambda[i] = self.Lambda[i]*BETA
+                        self.LastBackOff[i] = Time
+                    else:
+                        self.Lambda[i] += MULT[self.NodeID]*self.Alpha*STEP
                 else:
-                    self.Lambda[i] += MULT[self.NodeID]*self.Alpha*STEP
-            else:
-                self.Lambda[i] = MULT[self.NodeID]*NU*1/sum(REP)
+                    self.Lambda[i] = MULT[self.NodeID]*NU*1/sum(REP)
             
     def add_to_inbox(self, Packet):
         """
@@ -657,7 +689,7 @@ class Network:
         for Node in self.Nodes:
             for i in range(REP[Node.NodeID]):
                 Node.generate_txs(Time, i)
-            Node.process_inbox(Time)
+            Node.schedule_txs(Time)
             Node.check_congestion(Time)
             Node.set_rate(Time)
         """
