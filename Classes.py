@@ -11,11 +11,12 @@ import os
 import winsound
 from time import gmtime, strftime
 from shutil import copyfile
+import csv
 
 np.random.seed(0)
 # Simulation Parameters
 MONTE_CARLOS = 1
-SIM_TIME = 180
+SIM_TIME = 240
 STEP = 0.01
 # Network Parameters
 NU = 50
@@ -30,9 +31,9 @@ elif REPDIST=='uniform':
     # Permissioned System rep system?
     REP = np.ones(NUM_NODES, dtype=int)
 # Modes: 0 = inactive, 1 = content, 2 = best-effort, 3 = malicious
-MODE = [2-NodeID%3 for NodeID in range(NUM_NODES)]
-#MODE = [3-(NodeID+1)%4 for NodeID in range(NUM_NODES)]
-    
+MODE = [2-NodeID%3 for NodeID in range(NUM_NODES)] # honest env
+#MODE = [3-(NodeID+1)%4 for NodeID in range(NUM_NODES)] # malicoius env
+MODE[2]=4
 #AVG_WORK = [2*rep/max(REP) for rep in REP
 #AVG_WORK = np.ones(NUM_NODES)
 #IOT = np.concatenate((np.zeros(int(NUM_NODES/2)), np.ones(int(NUM_NODES/2))))
@@ -41,6 +42,7 @@ IOT = np.zeros(NUM_NODES)
 IOTLOW = 0.5
 IOTHIGH = 1
 MAX_WORK = 1
+MODE_COLOUR_MAP = ['grey', 'tab:blue', 'tab:red', 'tab:green', 'tab:orange']
 
 # Congestion Control Parameters
 ALPHA = 0.075
@@ -51,31 +53,25 @@ MAX_TH = MIN_TH
 QUANTUM = [rep/sum(REP) for rep in REP]
 W_Q = 0.1
 P_B = 0.5
-W_MAX = 200
-
+DROP_TH = 5
+SCHEDULE_ON_SOLID = True
+SOLID_REQUESTS = True
+BLACKLIST = True
 SCHEDULING = 'drr_lds'
     
 def main():
-    '''
-    Create directory for storing results with these parameters
-    '''
-    '''
-    dirstr = 'data/sched='+SCHEDULING+'/rep='+REPDIST+'/nu='+str(NU)+'/alpha='+str(ALPHA)+'/beta='+str(BETA)+'/RED='+str(MIN_TH)+'_'+str(MAX_TH)+'/w='+str(W_Q)+'/p_b='+str(P_B)+'/numnodes='+str(NUM_NODES)+'_' +str(NUM_NEIGHBOURS)+'/simtime='+str(SIM_TIME)+'/nmc='+str(MONTE_CARLOS)
-    if not Path(dirstr).exists():
-        print("Simulating")
-        simulate(dirstr)
-    else:
-        print("Simulation already done for these parameters")
-        #simulate(dirstr)
-    '''
-    #dirstr = simulate()
-    #dirstr = 'data/2020-07-31_142752'
-    #plot_results(dirstr)
-    #plot_results('data/2020-07-23_213333')
+
+    plt.close('all')
+    dirstr = simulate()
+    #dirstr = 'data/2020-08-19_142643'
+    plot_results(dirstr)
+    #plot_results('data/2020-07-23_213333') # honest environment
+    #plot_results('data/2020-07-26_122609') # malicious environment
+    #plot_results('data/2020-07-25_154015') # IoT
     #plot_scheduler_comp('Data/2020-07-23_233549', 'Data/2020-07-23_213333')
     #plot_ratesetter_comp('data/2020-07-24_132945', 'data/2020-07-23_213333', 'data/2020-07-24_153139') # changing beta
     #plot_ratesetter_comp('data/2020-07-23_212831', 'data/2020-07-23_213333', 'data/2020-07-24_124532') # changing W
-    plot_ratesetter_comp('data/2020-07-23_213056', 'data/2020-07-23_213333', 'data/2020-07-24_154211') # changing alpha
+    #plot_ratesetter_comp('data/2020-07-23_213056', 'data/2020-07-23_213333', 'data/2020-07-24_154211') # changing alpha
     winsound.Beep(2500, 1000) # beep to say sim is finished
     
 def simulate():
@@ -94,6 +90,7 @@ def simulate():
     OldestTxAge = []
     InboxLens = [np.zeros((TimeSteps, NUM_NODES)) for mc in range(MONTE_CARLOS)]
     InboxLensMA = [np.zeros((TimeSteps, NUM_NODES)) for mc in range(MONTE_CARLOS)]
+    SolidRequests = [np.zeros((TimeSteps, NUM_NODES)) for mc in range(MONTE_CARLOS)]
     Deficits = [np.zeros((TimeSteps, NUM_NODES)) for mc in range(MONTE_CARLOS)]
     Throughput = [np.zeros((TimeSteps, NUM_NODES)) for mc in range(MONTE_CARLOS)]
     WorkThroughput = [np.zeros((TimeSteps, NUM_NODES)) for mc in range(MONTE_CARLOS)]
@@ -108,6 +105,8 @@ def simulate():
     ServTimes = [[] for NodeID in range(NUM_NODES)]
     ArrTimes = [[] for NodeID in range(NUM_NODES)]
     interArrTimes = [[] for NodeID in range(NUM_NODES)]
+    DroppedTrans = [[] for NodeID in range(NUM_NODES)]
+    DropTimes = [[] for NodeID in range(NUM_NODES)]
     for mc in range(MONTE_CARLOS):
         """
         Generate network topology:
@@ -115,6 +114,7 @@ def simulate():
         graph from an adjlist txt file i.e. from the autopeering simulator
         """
         G = nx.random_regular_graph(NUM_NEIGHBOURS, NUM_NODES)
+        
         #G = nx.read_adjlist('input_adjlist.txt', delimiter=' ')
         # Get adjacency matrix and weight by delay at each channel
         ChannelDelays = 0.05*np.ones((NUM_NODES, NUM_NODES))+0.1*np.random.rand(NUM_NODES, NUM_NODES)
@@ -139,8 +139,9 @@ def simulate():
                     if HonestPackets:
                         OldestPacket = min(HonestPackets, key=lambda x: x.Data.IssueTime)
                         OldestTxAges[i,NodeID] = T - OldestPacket.Data.IssueTime
-                InboxLens[mc][i, NodeID] = len(Net.Nodes[NodeID].Inbox.AllPackets)
-                InboxLensMA[mc][i,NodeID] = Net.Nodes[NodeID].Inbox.Avg
+                InboxLens[mc][i, NodeID] = len(Net.Nodes[2].Neighbours[0].Inbox.Packets[NodeID])/REP[NodeID]
+                InboxLensMA[mc][i,NodeID] = len(Net.Nodes[2].Neighbours[0].Neighbours[-1].Inbox.Packets[NodeID])/REP[NodeID]
+                SolidRequests[mc][i,NodeID] = len(Net.Nodes[NodeID].Inbox.RequestedTrans)
                 Deficits[mc][i, NodeID] = Net.Nodes[0].Inbox.Deficit[NodeID]
                 Throughput[mc][i, NodeID] = Net.Throughput[NodeID]
                 WorkThroughput[mc][i,NodeID] = Net.WorkThroughput[NodeID]
@@ -161,12 +162,16 @@ def simulate():
             ArrWorks = [x for _,x in sorted(zip(Net.Nodes[NodeID].ArrivalTimes,Net.Nodes[NodeID].ArrivalWorks))]
             interArrTimes[NodeID].extend(np.diff(ArrTimes[NodeID])/ArrWorks[1:])
             inboxLatencies[NodeID].extend(Net.Nodes[NodeID].InboxLatencies)
-                
+            DroppedTrans[NodeID].extend(Net.Nodes[NodeID].Inbox.DroppedTrans)
+            DropTimes[NodeID].extend(Net.Nodes[NodeID].Inbox.DropTimes)
+            
+        Blacklist = [Net.Nodes[NodeID].Blacklist for NodeID in range(NUM_NODES)]
         latencies, latTimes = Net.tran_latency(latencies, latTimes)
         
         TP.append(np.concatenate((np.zeros((1000, NUM_NODES)),(Throughput[mc][1000:,:]-Throughput[mc][:-1000,:])))/10)
         WTP.append(np.concatenate((np.zeros((1000, NUM_NODES)),(WorkThroughput[mc][1000:,:]-WorkThroughput[mc][:-1000,:])))/10)
         #TP.append(np.convolve(np.zeros((Throughput[mc][500:,:]-Throughput[mc][:-500,:])))/5)
+        Neighbours = [[Neighb.NodeID for Neighb in Node.Neighbours] for Node in Net.Nodes]
         del Net
     """
     Get results
@@ -176,6 +181,7 @@ def simulate():
     avgWTP = sum(WTP)/len(WTP)
     avgInboxLen = sum(InboxLens)/len(InboxLens)
     avgInboxLenMA = sum(InboxLensMA)/len(InboxLensMA)
+    avgSolReq = sum(SolidRequests)/len(SolidRequests)
     avgDefs = sum(Deficits)/len(Deficits)
     avgUndissem = sum(Undissem)/len(Undissem)
     avgMeanDelay = sum(MeanDelay)/len(MeanDelay)
@@ -186,6 +192,17 @@ def simulate():
     """
     dirstr = 'data/'+ strftime("%Y-%m-%d_%H%M%S", gmtime())
     os.makedirs(dirstr, exist_ok=True)
+    pos=nx.spring_layout(G)
+    nx.draw_networkx_nodes(G,pos,
+                   nodelist=range(NUM_NODES),
+                   node_color=[MODE_COLOUR_MAP[MODE[NodeID]] for NodeID in range(NUM_NODES)],
+                   node_size=200,
+               alpha=0.8)
+    nx.draw_networkx_edges(G,pos,width=1.0,alpha=0.5)
+    mng = plt.get_current_fig_manager()
+    mng.window.showMaximized()
+    plt.axis('off')
+    plt.savefig(dirstr+'/Graph.png', bbox_inches='tight')
     np.savetxt(dirstr+'/aaconfig.txt', ['MCs = ' + str(MONTE_CARLOS) +
                                       '\nsimtime = ' + str(SIM_TIME) +
                                       '\nstep = ' + str(STEP) +
@@ -208,6 +225,9 @@ def simulate():
                                       '\nquantum = ' + str(QUANTUM) +
                                       '\nw_q = ' + str(W_Q) +
                                       '\np_b = ' + str(P_B) +
+                                      '\nSchedule on solid = ' + str(SCHEDULE_ON_SOLID) +
+                                      '\nsolidification requests = ' + str(SOLID_REQUESTS) +
+                                      '\nblacklist = ' + str(BLACKLIST) +
                                       '\nsched=' + SCHEDULING], delimiter = " ", fmt='%s')
     
     np.savetxt(dirstr+'/avgLmds.csv', avgLmds, delimiter=',')
@@ -215,21 +235,40 @@ def simulate():
     np.savetxt(dirstr+'/avgWTP.csv', avgWTP, delimiter=',')
     np.savetxt(dirstr+'/avgInboxLen.csv', avgInboxLen, delimiter=',')
     np.savetxt(dirstr+'/avgInboxLenMA.csv', avgInboxLenMA, delimiter=',')
+    np.savetxt(dirstr+'/avgSolReq.csv', avgSolReq, delimiter=',')
     np.savetxt(dirstr+'/avgDefs.csv', avgDefs, delimiter=',')
     np.savetxt(dirstr+'/avgUndissem.csv', avgUndissem, delimiter=',')
     np.savetxt(dirstr+'/avgMeanDelay.csv', avgMeanDelay, delimiter=',')
     np.savetxt(dirstr+'/avgMeanVisDelay.csv', avgMeanVisDelay, delimiter=',')
     np.savetxt(dirstr+'/avgOldestTxAge.csv', avgOTA, delimiter=',')
+    np.savetxt(dirstr+'/adjlist.csv', np.asarray(Neighbours), delimiter=',')
+    f = open(dirstr+'/blacklist.csv','w')
+    with f:
+        writer = csv.writer(f)
+        for row in Blacklist:
+            if row:
+                writer.writerow(row)
+            else:
+                writer.writerow('None')
     for NodeID in range(NUM_NODES):
-        np.savetxt(dirstr+'/inboxLatencies'+str(NodeID)+'.csv',
-                   np.asarray(inboxLatencies[NodeID]), delimiter=',')
         np.savetxt(dirstr+'/latencies'+str(NodeID)+'.csv',
                    np.asarray(latencies[NodeID]), delimiter=',')
+        '''
+        np.savetxt(dirstr+'/inboxLatencies'+str(NodeID)+'.csv',
+                   np.asarray(inboxLatencies[NodeID]), delimiter=',')
         np.savetxt(dirstr+'/ServTimes'+str(NodeID)+'.csv',
                    np.asarray(ServTimes[NodeID]), delimiter=',')
         np.savetxt(dirstr+'/ArrTimes'+str(NodeID)+'.csv',
                    np.asarray(ArrTimes[NodeID]), delimiter=',')
-    nx.write_adjlist(G, dirstr+'/result_adjlist.txt', delimiter=' ')
+        '''
+        if DroppedTrans[NodeID]:
+            Drops = np.zeros((len(DroppedTrans[NodeID]), 3))
+            for i in range(len(DroppedTrans[NodeID])):
+                Drops[i, 0] = DroppedTrans[NodeID][i].NodeID
+                Drops[i, 1] = DroppedTrans[NodeID][i].Index
+                Drops[i, 2] = DropTimes[NodeID][i]
+            np.savetxt(dirstr+'/Drops'+str(NodeID)+'.csv', Drops, delimiter=',')
+        
     return dirstr
 
 def plot_ratesetter_comp(dir1, dir2, dir3):
@@ -258,10 +297,10 @@ def plot_ratesetter_comp(dir1, dir2, dir3):
     axt.plot(np.arange(0, SIM_TIME, 1), avgMeanDelay3, color='tab:gray', marker = '^', markevery=int(markerevery*STEP))  
     
     ModeLines = [Line2D([0],[0],color='black', linestyle=None, marker='o'), Line2D([0],[0],color='black', linestyle=None, marker='x'), Line2D([0],[0],color='black', linestyle=None, marker='^')]
-    ax.legend(ModeLines, [r'$A=0.05$', r'$A=0.075$', r'$A=0.1$'], loc='lower right')
-    ax.set_title(r'$\beta=0.7, \quad W=2$')
-    #ax.legend(ModeLines, [r'$\beta=0.5$', r'$\beta=0.7$', r'$\beta=0.9$'], loc='lower right')
-    #ax.set_title(r'$A=0.075, \quad W=2$')
+    #ax.legend(ModeLines, [r'$A=0.05$', r'$A=0.075$', r'$A=0.1$'], loc='lower right')
+    #ax.set_title(r'$\beta=0.7, \quad W=2$')
+    ax.legend(ModeLines, [r'$\beta=0.5$', r'$\beta=0.7$', r'$\beta=0.9$'], loc='lower right')
+    ax.set_title(r'$A=0.075, \quad W=2$')
     #ax.legend(ModeLines, [r'$W=1$', r'$W=2$', r'$W=3$'], loc='lower right')
     #ax.set_title(r'$A=0.075, \quad \beta=0.7$')
     
@@ -275,7 +314,6 @@ def plot_ratesetter_comp(dir1, dir2, dir3):
     fig.tight_layout()
     plt.savefig(dirstr+'/Throughput.png', bbox_inches='tight')
     
-
 def plot_scheduler_comp(dir1, dir2):
     
     latencies1 = []
@@ -324,6 +362,7 @@ def plot_results(dirstr):
     avgTP = np.loadtxt(dirstr+'/avgWTP.csv', delimiter=',')
     avgInboxLen = np.loadtxt(dirstr+'/avgInboxLen.csv', delimiter=',')
     avgInboxLenMA = np.loadtxt(dirstr+'/avgInboxLenMA.csv', delimiter=',')
+    avgSolReq = np.loadtxt(dirstr+'/avgSolReq.csv', delimiter=',')
     avgUndissem = np.loadtxt(dirstr+'/avgUndissem.csv', delimiter=',')
     avgMeanDelay = np.loadtxt(dirstr+'/avgMeanDelay.csv', delimiter=',')
     #avgMeanDelay = np.loadtxt(dirstr+'/avgMeanVisDelay.csv', delimiter=',')
@@ -346,11 +385,13 @@ def plot_results(dirstr):
             inbLat = [0]
         inboxLatencies.append(inbLat)
         '''
-        ServTimes.append([np.loadtxt(dirstr+'/ServTimes'+str(NodeID)+'.csv', delimiter=',')])
-        ArrTimes.append([np.loadtxt(dirstr+'/ArrTimes'+str(NodeID)+'.csv', delimiter=',')])
+        #ServTimes.append([np.loadtxt(dirstr+'/ServTimes'+str(NodeID)+'.csv', delimiter=',')])
+        #ArrTimes.append([np.loadtxt(dirstr+'/ArrTimes'+str(NodeID)+'.csv', delimiter=',')])
     """
     Plot results
     """
+    
+        
     fig1, ax1 = plt.subplots(2,1, sharex=True, figsize=(8,8))
     ax1[0].title.set_text('Dissemination Rate')
     ax1[1].title.set_text('Scaled Dissemination Rate')
@@ -358,8 +399,8 @@ def plot_results(dirstr):
     ax1[1].grid(linestyle='--')
     ax1[1].set_xlabel('Time (sec)')
     #ax1[0].set_ylabel(r'${\lambda_i} / {\~{\lambda}_i}$')
-    ax1[0].set_ylabel(r'$D_i$')
-    ax1[1].set_ylabel(r'$D_i / {\~{\lambda}_i}$')
+    ax1[0].set_ylabel(r'$DR_i$')
+    ax1[1].set_ylabel(r'$DR_i / {\~{\lambda}_i}$')
     mal = False
     iot = False
     for NodeID in range(NUM_NODES):
@@ -374,7 +415,7 @@ def plot_results(dirstr):
         if MODE[NodeID]==2:
             ax1[0].plot(np.arange(10, SIM_TIME, STEP), avgTP[1000:,NodeID], linewidth=5*REP[NodeID]/REP[0], color='tab:red', marker=marker, markevery=0.1)
             ax1[1].plot(np.arange(10, SIM_TIME, STEP), avgTP[1000:,NodeID]*sum(REP)/(NU*REP[NodeID]), linewidth=5*REP[NodeID]/REP[0], color='tab:red', marker=marker, markevery=0.1)
-        if MODE[NodeID]==3:
+        if MODE[NodeID]>2:
             ax1[0].plot(np.arange(10, SIM_TIME, STEP), avgTP[1000:,NodeID], linewidth=5*REP[NodeID]/REP[0], color='tab:green', marker=marker, markevery=0.1)
             ax1[1].plot(np.arange(10, SIM_TIME, STEP), avgTP[1000:,NodeID]*sum(REP)/(NU*REP[NodeID]), linewidth=5*REP[NodeID]/REP[0], color='tab:green', marker=marker, markevery=0.1)
             mal = True
@@ -407,6 +448,7 @@ def plot_results(dirstr):
     ax3.set_xlabel('Latency (sec)')
     plot_cdf(latencies, ax3)
     plt.savefig(dirstr+'/Latency.png', bbox_inches='tight')
+    
     '''
     fig3a, ax3a = plt.subplots(figsize=(8,4))
     ax3a.grid(linestyle='--')
@@ -433,20 +475,52 @@ def plot_results(dirstr):
     fig5, ax5 = plt.subplots(figsize=(8,4))
     ax5.grid(linestyle='--')
     ax5.set_xlabel('Time (sec)')
-    ax5.set_ylabel('Inbox length')
-    N=2000
-    '''
+    ax5.set_ylabel('Reputation-scaled inbox length (neighbour)')
+    N=100
     for NodeID in range(NUM_NODES):
         if MODE[NodeID]==1:
-            ax5.plot(np.arange((N-1)*STEP, SIM_TIME, STEP), np.convolve(np.ones(N)/N, avgInboxLen[:,NodeID], 'valid'), color='tab:blue')
+            ax5.plot(np.arange((N-1)*STEP, SIM_TIME, STEP), np.convolve(np.ones(N)/N, avgInboxLen[:,NodeID], 'valid'), color='tab:blue', linewidth=5*REP[NodeID]/REP[0])
         if MODE[NodeID]==2:
-            ax5.plot(np.arange((N-1)*STEP, SIM_TIME, STEP), np.convolve(np.ones(N)/N, avgInboxLen[:,NodeID], 'valid'), color='tab:red')
-    '''
-    ax5.plot(np.arange((N-1)*STEP, SIM_TIME, STEP), np.convolve(np.ones(N)/N, avgInboxLen[:,1], 'valid'), color='black')
+            ax5.plot(np.arange((N-1)*STEP, SIM_TIME, STEP), np.convolve(np.ones(N)/N, avgInboxLen[:,NodeID], 'valid'), color='tab:red', linewidth=5*REP[NodeID]/REP[0])
+        if MODE[NodeID]>2:
+            ax5.plot(np.arange((N-1)*STEP, SIM_TIME, STEP), np.convolve(np.ones(N)/N, avgInboxLen[:,NodeID], 'valid'), color='tab:green', linewidth=5*REP[NodeID]/REP[0])
     ax5.set_xlim(0, SIM_TIME)
     
     plt.savefig(dirstr+'/AvgInboxLen.png', bbox_inches='tight')
     
+    fig5, ax5 = plt.subplots(figsize=(8,4))
+    ax5.grid(linestyle='--')
+    ax5.set_xlabel('Time (sec)')
+    ax5.set_ylabel('Reputation-scaled inbox length (neighbour of neighbour)')
+    N=100
+    for NodeID in range(NUM_NODES):
+        if MODE[NodeID]==1:
+            ax5.plot(np.arange((N-1)*STEP, SIM_TIME, STEP), np.convolve(np.ones(N)/N, avgInboxLenMA[:,NodeID], 'valid'), color='tab:blue', linewidth=5*REP[NodeID]/REP[0])
+        if MODE[NodeID]==2:
+            ax5.plot(np.arange((N-1)*STEP, SIM_TIME, STEP), np.convolve(np.ones(N)/N, avgInboxLenMA[:,NodeID], 'valid'), color='tab:red', linewidth=5*REP[NodeID]/REP[0])
+        if MODE[NodeID]>2:
+            ax5.plot(np.arange((N-1)*STEP, SIM_TIME, STEP), np.convolve(np.ones(N)/N, avgInboxLenMA[:,NodeID], 'valid'), color='tab:green', linewidth=5*REP[NodeID]/REP[0])
+    ax5.set_xlim(0, SIM_TIME)
+    
+    plt.savefig(dirstr+'/AvgInboxLenMA.png', bbox_inches='tight')
+    
+    fig5, ax5 = plt.subplots(figsize=(8,4))
+    ax5.grid(linestyle='--')
+    ax5.set_xlabel('Time (sec)')
+    ax5.set_ylabel('Solidification Requests Pending')
+    N=100
+    for NodeID in range(NUM_NODES):
+        if MODE[NodeID]==1:
+            ax5.plot(np.arange((N-1)*STEP, SIM_TIME, STEP), np.convolve(np.ones(N)/N, avgSolReq[:,NodeID], 'valid'), color='tab:blue', linewidth=5*REP[NodeID]/REP[0])
+        if MODE[NodeID]==2:
+            ax5.plot(np.arange((N-1)*STEP, SIM_TIME, STEP), np.convolve(np.ones(N)/N, avgSolReq[:,NodeID], 'valid'), color='tab:red', linewidth=5*REP[NodeID]/REP[0])
+        if MODE[NodeID]>2:
+            ax5.plot(np.arange((N-1)*STEP, SIM_TIME, STEP), np.convolve(np.ones(N)/N, avgSolReq[:,NodeID], 'valid'), color='tab:green', linewidth=5*REP[NodeID]/REP[0])
+    ax5.set_xlim(0, SIM_TIME)
+    
+    plt.savefig(dirstr+'/AvgSolReq.png', bbox_inches='tight')
+    
+    '''
     fig5a, ax5a = plt.subplots(figsize=(8,4))
     ax5a.grid(linestyle='--')
     ax5a.set_xlabel('Time (sec)')
@@ -478,7 +552,7 @@ def plot_results(dirstr):
     ax5b.plot(bins, inboxLen, color='blue')
     
     plt.savefig(dirstr+'/InboxLenMA.png', bbox_inches='tight')
-    
+    '''
     fig6, ax6 = plt.subplots(figsize=(8,4))
     ax6.grid(linestyle='--')
     ax6.set_xlabel('Node ID')
@@ -491,7 +565,7 @@ def plot_results(dirstr):
             ax6.bar(NodeID, REP[NodeID], color='tab:blue')
         if MODE[NodeID]==2:
             ax6.bar(NodeID, REP[NodeID], color='tab:red')
-        if MODE[NodeID]==3:
+        if MODE[NodeID]>2:
             ax6.bar(NodeID, REP[NodeID], color='tab:green')
     ModeLines = [Line2D([0],[0],color='tab:red', lw=4), Line2D([0],[0],color='tab:blue', lw=4), Line2D([0],[0],color='gray', lw=4), Line2D([0],[0],color='tab:green', lw=4)]
     ax6.legend(ModeLines, ['Best-effort', 'Content', 'Inactive', 'Malicious'], loc='upper right')
@@ -552,7 +626,7 @@ def plot_cdf(data, ax, xlim=0):
                 Lines[NodeID] = ax.plot(bins, cdf, color='tab:blue', linewidth=4*REP[NodeID]/REP[0], marker=marker, markevery=0.1)
             if MODE[NodeID]==2:
                 Lines[NodeID] = ax.plot(bins, cdf, color='tab:red', linewidth=4*REP[NodeID]/REP[0], marker=marker, markevery=0.1)
-            if MODE[NodeID]==3:
+            if MODE[NodeID]>2:
                 mal = True
                 Lines[NodeID] = ax.plot(bins, cdf, color='tab:green', linewidth=4*REP[NodeID]/REP[0], marker=marker, markevery=0.1)
     if mal:
@@ -611,6 +685,8 @@ class Transaction:
         self.VisibleTime = VisibleTime
         self.Children = []
         self.Parents = Parents
+        for p in Parents:
+            p.Children.append(self)
         self.Index = Index
         self.InformedNodes = 0
         self.GlobalSolidTime = []
@@ -619,17 +695,24 @@ class Transaction:
             self.NodeID = Node.NodeID # signature of issuing node
         else: # genesis
             self.NodeID = []
+            
+class SolRequest:
+    '''
+    Object to request solidification of a transaction
+    '''
+    def __init__(self, Tran):
+        self.Tran = Tran
 
 class Node:
     """
     Object to simulate an IOTA full node
     """
     def __init__(self, Network, NodeID, Genesis, PoWDelay = 1):
-        self.TipsSet = [Genesis]
+        self.TipsSet = []
         self.Ledger = [Genesis]
         self.Neighbours = []
         self.Network = Network
-        self.Inbox = Inbox()
+        self.Inbox = Inbox(self)
         self.NodeID = NodeID
         self.Alpha = ALPHA*REP[NodeID]/sum(REP)
         self.Lambda = NU*REP[NodeID]/sum(REP)
@@ -646,6 +729,9 @@ class Node:
         self.ArrivalTimes = []
         self.ArrivalWorks = []
         self.InboxLatencies = []
+        self.ValidTips = [True for NodeID in range(NUM_NODES)]
+        self.TranCounter = 0
+        self.Blacklist = []
         
     def issue_txs(self, Time):
         """
@@ -664,7 +750,8 @@ class Node:
                     else:
                         Work = 1
                     self.LastIssueWork = Work
-                    self.IssuedTrans.append(Transaction(self.LastIssueTime, Parents, self, Work))
+                    self.TranCounter += 1
+                    self.IssuedTrans.append(Transaction(self.LastIssueTime, Parents, self, Work, Index=self.TranCounter))
             elif MODE[self.NodeID]==1:
                 if IOT[self.NodeID]:
                     Work = np.random.uniform(IOTLOW,IOTHIGH)
@@ -674,21 +761,23 @@ class Node:
                 for t in times:
                     Parents = self.select_tips()
                     #Work = np.random.uniform(AVG_WORK[self.NodeID]-0.5, AVG_WORK[self.NodeID]+0.5)
-                    self.IssuedTrans.append(Transaction(t, Parents, self, Work))
+                    self.TranCounter += 1
+                    self.IssuedTrans.append(Transaction(t, Parents, self, Work, Index=self.TranCounter))
             else:
                 Work = 1
                 times = np.sort(np.random.uniform(Time, Time+STEP, np.random.poisson(STEP*self.Lambda/Work)))
                 for t in times:
                     Parents = self.select_tips()
                     #Work = np.random.uniform(AVG_WORK[self.NodeID]-0.5, AVG_WORK[self.NodeID]+0.5)
-                    self.IssuedTrans.append(Transaction(t, Parents, self, Work))
+                    self.TranCounter += 1
+                    self.IssuedTrans.append(Transaction(t, Parents, self, Work, Index=self.TranCounter))
                 
         # check PoW completion
         while self.IssuedTrans:
             Tran = self.IssuedTrans.pop(0)
             p = Packet(self, self, Tran, Tran.IssueTime)
             p.EndTime = Tran.IssueTime
-            if MODE[self.NodeID]==3: # malicious don't consider own txs for scheduling
+            if MODE[self.NodeID]>2: # malicious don't consider own txs for scheduling
                 self.add_to_ledger(self, Tran, Tran.IssueTime)
             else:
                 self.add_to_inbox(p, Tran.IssueTime)
@@ -697,8 +786,11 @@ class Node:
         """
         Implements uniform random tip selection
         """
-        if len(self.TipsSet)>1:
-            Selection = sample(self.TipsSet, 2)
+        ValidTips = [tip for tip in self.TipsSet if self.ValidTips[tip.NodeID]]
+        if len(ValidTips)>1:
+            Selection = sample(ValidTips, 2)
+        elif len(self.Ledger)<2:
+            Selection = [self.Ledger[0]]
         else:
             Selection = self.Ledger[-2:-1]
         return Selection
@@ -709,12 +801,14 @@ class Node:
         """
         # sort inboxes by arrival time
         self.Inbox.AllPackets.sort(key=lambda p: p.EndTime)
+        self.Inbox.SolidPackets.sort(key=lambda p: p.EndTime)
         for NodeID in range(NUM_NODES):
-            self.Inbox.Packets[NodeID].sort(key=lambda p: p.EndTime)
+            self.Inbox.Packets[NodeID].sort(key=lambda p: p.Data.IssueTime)
+
         # process according to global rate Nu
-        while self.Inbox.AllPackets:
-            nextSchedTime = max(self.LastScheduleTime+(self.LastScheduleWork/NU), self.Inbox.AllPackets[0].EndTime)
-            if nextSchedTime<Time+STEP:                
+        while self.Inbox.SolidPackets or self.Inbox.Scheduled:
+            nextSchedTime = max(self.LastScheduleTime+(self.LastScheduleWork/NU), self.Inbox.SolidPackets[0].EndTime)
+            if nextSchedTime<Time+STEP:             
                 if SCHEDULING=='drr':
                     Packet = self.Inbox.drr_schedule(nextSchedTime)
                 elif SCHEDULING=='drr_lds':
@@ -759,19 +853,35 @@ class Node:
             Tran.GlobalSolidTime = Time
             self.Network.Nodes[Tran.NodeID].Undissem -= 1
             self.Network.Nodes[Tran.NodeID].UndissemWork -= Tran.Work
-            
-        if not Tran.Children:
+        
+        if Tran.Children:
+            if not [c for c in Tran.Children if c in self.Ledger]:
+                self.TipsSet.append(Tran)
+            for c in Tran.Children:
+                if c in self.Inbox.Trans:
+                    if self.is_solid(c):
+                        packet = [p for p in self.Inbox.AllPackets if p.Data==c]
+                        self.Inbox.SolidPackets.append(packet[0])
+        else:
             self.TipsSet.append(Tran)
-        if Tran.Parents:
-            for Parent in Tran.Parents:
-                Parent.Children.append(Tran)
-                if Parent in self.TipsSet:
-                    self.TipsSet.remove(Parent)
-                else:
-                    continue
-        # broadcast the packet
-        self.Network.broadcast_data(self, TxNode, Tran, Time)
-    
+
+        for Parent in Tran.Parents:
+            if Parent in self.TipsSet:
+                self.TipsSet.remove(Parent)
+            else:
+                continue
+        self.forward(TxNode, Tran, Time)# broadcast the packet
+        
+    def forward(self, TxNode, Tran, Time):
+        '''
+        Forward this transaction to all but the node it was received from
+        '''
+        if MODE[self.NodeID]==4:
+            neighb = np.random.randint(NUM_NEIGHBOURS)
+            self.Network.send_data(self, self.Neighbours[neighb], Tran, Time)
+        else:
+            self.Network.broadcast_data(self, TxNode, Tran, Time)
+            
     def check_congestion(self, Time):
         """
         Check for rate setting
@@ -787,7 +897,7 @@ class Node:
         Additively increase or multiplicatively decrease lambda
         """
         if MODE[self.NodeID]>0:
-            if MODE[self.NodeID]==2 and Time>=START_TIMES[self.NodeID]: # AIMD starts after 1 min adjustment
+            if MODE[self.NodeID]==2 and Time>=START_TIMES[self.NodeID]: # AIMD starts after settling time
                 # if wait time has not passed---reset.
                 if self.LastBackOff:
                     if Time < self.LastBackOff + TAU:#BETA*REP[self.NodeID]/self.Lambda:
@@ -800,10 +910,10 @@ class Node:
                     self.LastBackOff = Time
                 else:
                     self.Lambda += self.Alpha
-            elif MODE[self.NodeID]<3: #honest active
+            elif MODE[self.NodeID]>2 and Time>=START_TIMES[self.NodeID]: # malicious starts after start time
+                self.Lambda = NUM_NEIGHBOURS*NU*REP[self.NodeID]/sum(REP)
+            else: # any active node, malicious or honest
                 self.Lambda = NU*REP[self.NodeID]/sum(REP)
-            else: # malicious
-                self.Lambda = 3*NU*REP[self.NodeID]/sum(REP)
         else:
             self.Lambda = 0
             
@@ -811,36 +921,46 @@ class Node:
         """
         Add to inbox if not already received and/or processed
         """
-        if Packet.Data not in self.Inbox.Trans:
-            if Packet.Data not in self.Ledger:
-                self.Inbox.AllPackets.append(Packet)
-                NodeID = Packet.Data.NodeID
-                if NodeID in self.Inbox.Empty:
-                    self.Inbox.Empty.remove(NodeID)
-                    self.Inbox.New.append(NodeID)
-                    self.Inbox.Deficit[NodeID] += QUANTUM[NodeID]
-                self.Inbox.Packets[NodeID].append(Packet)
-                self.Inbox.Trans.append(Packet.Data)
-                self.ArrivalWorks.append(Packet.Data.Work)
-                self.ArrivalTimes.append(Time)
-                if NodeID==self.NodeID:
-                    #self.Inbox.Avg = (1-W_Q)*self.Inbox.Avg + W_Q*len(self.Inbox.Packets[self.NodeID])
-                    self.check_congestion(Time)
-                '''
-                Buffer Management
-                '''
-                self.Inbox.Work[NodeID] += Packet.Data.Work
-                if sum(self.Inbox.Work)>W_MAX:
-                    ScaledWork = np.array([self.Inbox.Work[NodeID]/REP[NodeID] for NodeID in range(NUM_NODES)])
-                    MalNodeID = np.argmax(ScaledWork)
-                    self.Inbox.remove_packet(self.Inbox.Packets[MalNodeID][0])
+        Tran = Packet.Data
+        if Tran not in self.Inbox.Trans:
+            if Tran not in self.Ledger:
+                NodeID = Tran.NodeID
+                ScaledWork = self.Inbox.Work[NodeID]/REP[NodeID]
+                if Tran not in self.Inbox.RequestedTrans:
+                    if NodeID not in self.Blacklist:
+                        if NodeID==self.NodeID:
+                            self.Inbox.add_packet(Packet)
+                            self.check_congestion(Time)
+                        else:
+                            if ScaledWork>DROP_TH and BLACKLIST:
+                                self.Blacklist.append(NodeID)
+                                self.Inbox.drop_packet(Packet)
+                            else:
+                                self.ValidTips[NodeID] = True
+                                self.Inbox.add_packet(Packet)
+                    else:
+                        self.Inbox.drop_packet(Packet)
+                else:
+                    self.Inbox.add_packet(Packet)
                 
+                self.ArrivalWorks.append(Tran.Work)
+                self.ArrivalTimes.append(Time)
+                            
+    def is_solid(self, Tran):
+        isSolid = True
+        for p in Tran.Parents:
+            if p not in self.Ledger:
+                isSolid = False
+        return isSolid
+    
 class Inbox:
     """
     Object for holding packets in different channels corresponding to different nodes
     """
-    def __init__(self):
+    def __init__(self, Node):
+        self.Node = Node
         self.AllPackets = [] # Inbox_m
+        self.SolidPackets = []
         self.Packets = [[] for NodeID in range(NUM_NODES)] # Inbox_m(i)
         self.Work = np.zeros(NUM_NODES)
         self.Trans = []
@@ -851,16 +971,47 @@ class Inbox:
         self.New = []
         self.Old = []
         self.Empty = [NodeID for NodeID in range(NUM_NODES)]
-       
+        self.RequestedTrans = []
+        self.DroppedTrans = []
+        self.DropTimes = []
+    
+    def add_packet(self, Packet):
+        Tran = Packet.Data
+        NodeID = Tran.NodeID
+        if Tran in self.RequestedTrans:
+            if self.Packets[NodeID]:
+                Packet.EndTime = self.Packets[NodeID][0].EndTime # move packet to the front of the queue
+            self.RequestedTrans = [tran for tran in self.RequestedTrans if tran != Tran]
+            self.Packets[NodeID].insert(0,Packet)
+        else:
+            self.Packets[NodeID].append(Packet)
+        self.AllPackets.append(Packet)
+        # check if solid
+        if self.Node.is_solid(Tran):
+            self.SolidPackets.append(Packet)
+        if NodeID in self.Empty:
+            self.Empty.remove(NodeID)
+            self.New.append(NodeID)
+            self.Deficit[NodeID] += QUANTUM[NodeID]
+        self.Trans.append(Tran)
+        self.Work[NodeID] += Packet.Data.Work
+    
+    def drop_packet(self, Packet):
+        self.DroppedTrans.append(Packet.Data)
+        self.DropTimes.append(Packet.EndTime)
+    
     def remove_packet(self, Packet):
         """
         Remove from Inbox and filtered inbox etc
         """
         if self.Trans:
             if Packet in self.AllPackets:
+                Tran = Packet.Data
                 self.AllPackets.remove(Packet)
+                if Packet in self.SolidPackets:
+                    self.SolidPackets.remove(Packet)
                 self.Packets[Packet.Data.NodeID].remove(Packet)
-                self.Trans.remove(Packet.Data)  
+                self.Trans.remove(Tran)  
                 self.Work[Packet.Data.NodeID] -= Packet.Data.Work
         
     def drr_schedule(self, Time):
@@ -870,10 +1021,14 @@ class Inbox:
             while not self.Scheduled:
                 if self.Packets[self.RRNodeID]:
                     self.Deficit[self.RRNodeID] += QUANTUM[self.RRNodeID]
-                    while self.Packets[self.RRNodeID]:
-                        Work = self.Packets[self.RRNodeID][0].Data.Work
+                    i=0
+                    while self.Packets[self.RRNodeID] and i<len(self.Packets[self.RRNodeID]):
+                        Tran = self.Packets[self.RRNodeID][i].Data
+                        Work = Tran.Work
+                        if not self.is_solid(Tran):
+                            continue
                         if self.Deficit[self.RRNodeID]>=Work:
-                            Packet = self.Packets[self.RRNodeID][0]
+                            Packet = self.Packets[self.RRNodeID][i]
                             self.Deficit[self.RRNodeID] -= Work
                             # remove the transaction from all inboxes
                             self.remove_packet(Packet)
@@ -888,29 +1043,37 @@ class Inbox:
     def drr_lds_schedule(self, Time):
         if self.Scheduled:
             return self.Scheduled.pop(0)
-        if self.AllPackets:
-            if self.AllPackets[0].EndTime>Time:
-                return
-            while not self.Scheduled:
-                if self.Deficit[self.RRNodeID]<MAX_WORK:
-                    self.Deficit[self.RRNodeID] += QUANTUM[self.RRNodeID]
-                '''
-                if self.Packets[self.RRNodeID]:
-                    self.Deficit[self.RRNodeID] += QUANTUM[self.RRNodeID]
+        
+        if SCHEDULE_ON_SOLID:
+            Packets = [self.SolidPackets]
+        else:
+            Packets = [self.AllPackets]
+        while Packets[0] and not self.Scheduled:
+            if self.Deficit[self.RRNodeID]<MAX_WORK:
+                self.Deficit[self.RRNodeID] += QUANTUM[self.RRNodeID]
+            i = 0
+            while self.Packets[self.RRNodeID] and i<len(self.Packets[self.RRNodeID]):
+                Packet = self.Packets[self.RRNodeID][i]
+                if Packet not in Packets[0]:
+                    i += 1
+                    if SOLID_REQUESTS:
+                        for p in Packet.Data.Parents:
+                            if p not in self.RequestedTrans and p not in self.AllPackets:
+                                # send a solidification request for this tran's parents
+                                self.Node.Network.send_data(self.Node, Packet.TxNode, SolRequest(p), Time)
+                                self.RequestedTrans.append(p)
+                    continue
+                Work = Packet.Data.Work
+                if self.Deficit[self.RRNodeID]>=Work and Packet.EndTime<=Time:
+                    self.Deficit[self.RRNodeID] -= Work
+                    # remove the transaction from all inboxes
+                    self.remove_packet(Packet)
+                    self.Scheduled.append(Packet)
                 else:
-                    self.Deficit[self.RRNodeID] = min(self.Deficit[self.RRNodeID]+QUANTUM[self.RRNodeID], MAX_WORK)
-                '''
-                while self.Packets[self.RRNodeID]:
-                    Work = self.Packets[self.RRNodeID][0].Data.Work
-                    Packet = self.Packets[self.RRNodeID][0]
-                    if self.Deficit[self.RRNodeID]>=Work and Packet.EndTime<=Time:
-                        self.Deficit[self.RRNodeID] -= Work
-                        # remove the transaction from all inboxes
-                        self.remove_packet(Packet)
-                        self.Scheduled.append(Packet)
-                    else:
-                        break
-                self.RRNodeID = (self.RRNodeID+1)%NUM_NODES
+                    i += 1
+                    continue
+            self.RRNodeID = (self.RRNodeID+1)%NUM_NODES
+        if self.Scheduled:
             return self.Scheduled.pop(0)
         
     def drrpp_schedule(self, Time):
@@ -989,7 +1152,7 @@ class CommChannel:
         Add new packet to the comm channel with time of arrival
         """
         self.Packets.append(Packet(TxNode, RxNode, Data, Time))
-        self.PacketDelays.append(np.random.normal(loc=self.Delay, scale=1/NU))
+        self.PacketDelays.append(np.random.exponential(scale=self.Delay))
     
     def transmit_packets(self, Time):
         """
@@ -1011,6 +1174,10 @@ class CommChannel:
         if isinstance(Packet.Data, Transaction):
             # if this is a transaction, add the Packet to Inbox
             self.RxNode.add_to_inbox(Packet, Time)
+        elif isinstance(Packet.Data, SolRequest):
+            # else if this is a solidification request, retrieve the transaction and send it back
+            Tran = Packet.Data.Tran
+            self.RxNode.Network.send_data(self.RxNode, self.TxNode, Tran, Time)
         else: 
             # else this is a back off notification
             self.RxNode.process_cong_notif(Packet, Time)
