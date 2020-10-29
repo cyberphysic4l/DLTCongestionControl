@@ -42,7 +42,7 @@ IOT = np.zeros(NUM_NODES)
 IOTLOW = 0.5
 IOTHIGH = 1
 MAX_WORK = 1
-MODE_COLOUR_MAP = ['grey', 'tab:blue', 'tab:red', 'tab:green', 'tab:orange']
+MODE_COLOUR_MAP = ['grey', 'tab:blue', 'tab:red', 'tab:green', 'tab:green']
 
 # Congestion Control Parameters
 ALPHA = 0.075
@@ -81,10 +81,9 @@ def simulate():
     # seed rng
     np.random.seed(0)
     TimeSteps = int(SIM_TIME/STEP)
-    
-    """
-    Monte Carlo Sims
-    """
+    '''
+    Create empty arrays to store results
+    '''
     Lmds = [np.zeros((TimeSteps, NUM_NODES)) for mc in range(MONTE_CARLOS)]
     OldestTxAges = np.zeros((TimeSteps, NUM_NODES))
     OldestTxAge = []
@@ -107,6 +106,9 @@ def simulate():
     interArrTimes = [[] for NodeID in range(NUM_NODES)]
     DroppedTrans = [[] for NodeID in range(NUM_NODES)]
     DropTimes = [[] for NodeID in range(NUM_NODES)]
+    """
+    Monte Carlo Sims
+    """
     for mc in range(MONTE_CARLOS):
         """
         Generate network topology:
@@ -119,8 +121,8 @@ def simulate():
         # Get adjacency matrix and weight by delay at each channel
         ChannelDelays = 0.05*np.ones((NUM_NODES, NUM_NODES))+0.1*np.random.rand(NUM_NODES, NUM_NODES)
         AdjMatrix = np.multiply(1*np.asarray(nx.to_numpy_matrix(G)), ChannelDelays)
-        Net = Network(AdjMatrix)
-        # output arrays
+        Net = Network(AdjMatrix) # instantiate the network
+        
         for i in range(TimeSteps):
             if 100*i/TimeSteps%10==0:
                 print("Simulation: "+str(mc) +"\t " + str(int(100*i/TimeSteps))+"% Complete")
@@ -131,7 +133,9 @@ def simulate():
             and runs the simulation for a time step
             """
             Net.simulate(T)
-            # save summary results in output arrays
+            '''
+            save summary results in output arrays
+            '''
             for NodeID in range(NUM_NODES):
                 Lmds[mc][i, NodeID] = Net.Nodes[NodeID].Lambda
                 if Net.Nodes[NodeID].Inbox.AllPackets and MODE[NodeID]<3: #don't include malicious nodes
@@ -365,10 +369,8 @@ def plot_results(dirstr):
     avgSolReq = np.loadtxt(dirstr+'/avgSolReq.csv', delimiter=',')
     avgUndissem = np.loadtxt(dirstr+'/avgUndissem.csv', delimiter=',')
     avgMeanDelay = np.loadtxt(dirstr+'/avgMeanDelay.csv', delimiter=',')
-    #avgMeanDelay = np.loadtxt(dirstr+'/avgMeanVisDelay.csv', delimiter=',')
     avgOTA = np.loadtxt(dirstr+'/avgOldestTxAge.csv', delimiter=',')
     latencies = []
-    #inboxLatencies = []
     ServTimes = []
     ArrTimes = []
     
@@ -678,7 +680,7 @@ def plot_cdf_exp(data, ax):
 
 class Transaction:
     """
-    Object to simulate a transaction its edges in the DAG
+    Object to simulate a transaction and its edges in the DAG
     """
     def __init__(self, IssueTime, Parents, Node, Work=0, Index=None, VisibleTime=None):
         self.IssueTime = IssueTime
@@ -1006,7 +1008,7 @@ class Inbox:
         """
         if self.Trans:
             if Packet in self.AllPackets:
-                Tran = Packet.Data
+                Tran = Packet.Data # Take transaction from the packet
                 self.AllPackets.remove(Packet)
                 if Packet in self.SolidPackets:
                     self.SolidPackets.remove(Packet)
@@ -1014,7 +1016,7 @@ class Inbox:
                 self.Trans.remove(Tran)  
                 self.Work[Packet.Data.NodeID] -= Packet.Data.Work
         
-    def drr_schedule(self, Time):
+    def drr_schedule(self, Time): # Not up to date with solidification rules
         if self.Scheduled:
             return self.Scheduled.pop(0)
         if self.AllPackets:
@@ -1076,7 +1078,7 @@ class Inbox:
         if self.Scheduled:
             return self.Scheduled.pop(0)
         
-    def drrpp_schedule(self, Time):
+    def drrpp_schedule(self, Time): # Not up to date
         while self.New:
             NodeID = self.New[0]
             if not self.Packets[NodeID] or self.Deficit[NodeID]<0:
@@ -1113,7 +1115,7 @@ class Inbox:
                 if self.Old:
                     self.Deficit[self.Old[0]] += QUANTUM[self.Old[0]]
                     
-    def fifo_schedule(self, Time):
+    def fifo_schedule(self, Time): # Not up to date with solidification rules
         if self.AllPackets:
             Packet = self.AllPackets[0]
             # remove the transaction from all inboxes
