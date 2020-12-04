@@ -16,12 +16,14 @@ import csv
 np.random.seed(0)
 # Simulation Parameters
 MONTE_CARLOS = 1
-SIM_TIME = 240
+SIM_TIME = 180
 STEP = 0.01
 # Network Parameters
+GRAPH = 'cycle' # regular, complete or cycle
 NU = 50
 NUM_NODES = 50
 NUM_NEIGHBOURS = 4
+CHAN_DELAY_MEAN = 0.05
 START_TIMES = 10*np.ones(NUM_NODES)
 REPDIST = 'zipf'
 if REPDIST=='zipf':
@@ -33,7 +35,7 @@ elif REPDIST=='uniform':
 # Modes: 0 = inactive, 1 = content, 2 = best-effort, 3 = malicious
 MODE = [2-NodeID%3 for NodeID in range(NUM_NODES)] # honest env
 #MODE = [3-(NodeID+1)%4 for NodeID in range(NUM_NODES)] # malicoius env
-MODE[2]=4
+#MODE[2]=4
 #AVG_WORK = [2*rep/max(REP) for rep in REP
 #AVG_WORK = np.ones(NUM_NODES)
 #IOT = np.concatenate((np.zeros(int(NUM_NODES/2)), np.ones(int(NUM_NODES/2))))
@@ -41,7 +43,7 @@ MODE[2]=4
 IOT = np.zeros(NUM_NODES)
 IOTLOW = 0.5
 IOTHIGH = 1
-MAX_WORK = 1
+MAX_WORK = 10
 MODE_COLOUR_MAP = ['grey', 'tab:blue', 'tab:red', 'tab:green', 'tab:green']
 
 # Congestion Control Parameters
@@ -50,7 +52,7 @@ BETA = 0.5
 TAU = 2
 MIN_TH = 1
 MAX_TH = MIN_TH
-QUANTUM = [rep/sum(REP) for rep in REP]
+QUANTUM = [MAX_WORK*rep/sum(REP) for rep in REP]
 W_Q = 0.1
 P_B = 0.5
 DROP_TH = 5
@@ -115,11 +117,16 @@ def simulate():
         Comment out one of the below lines for either random k-regular graph or a
         graph from an adjlist txt file i.e. from the autopeering simulator
         """
-        G = nx.random_regular_graph(NUM_NEIGHBOURS, NUM_NODES)
+        if GRAPH=='regular':
+            G = nx.random_regular_graph(NUM_NEIGHBOURS, NUM_NODES) # random regular graph
+        elif GRAPH=='complete':
+            G = nx.complete_graph(NUM_NODES) # complete graph
+        elif GRAPH=='cycle':
+            G = nx.cycle_graph(NUM_NODES) # cycle graph
         
         #G = nx.read_adjlist('input_adjlist.txt', delimiter=' ')
         # Get adjacency matrix and weight by delay at each channel
-        ChannelDelays = 0.05*np.ones((NUM_NODES, NUM_NODES))+0.1*np.random.rand(NUM_NODES, NUM_NODES)
+        ChannelDelays = 0.05*np.ones((NUM_NODES, NUM_NODES))+0.1*np.random.rand(NUM_NODES, NUM_NODES) # not used anymore
         AdjMatrix = np.multiply(1*np.asarray(nx.to_numpy_matrix(G)), ChannelDelays)
         Net = Network(AdjMatrix) # instantiate the network
         
@@ -146,7 +153,7 @@ def simulate():
                 InboxLens[mc][i, NodeID] = len(Net.Nodes[2].Neighbours[0].Inbox.Packets[NodeID])/REP[NodeID]
                 InboxLensMA[mc][i,NodeID] = len(Net.Nodes[2].Neighbours[0].Neighbours[-1].Inbox.Packets[NodeID])/REP[NodeID]
                 SolidRequests[mc][i,NodeID] = len(Net.Nodes[NodeID].Inbox.RequestedTrans)
-                Deficits[mc][i, NodeID] = Net.Nodes[0].Inbox.Deficit[NodeID]
+                Deficits[mc][i, NodeID] = Net.Nodes[6].Inbox.Deficit[NodeID]
                 Throughput[mc][i, NodeID] = Net.Throughput[NodeID]
                 WorkThroughput[mc][i,NodeID] = Net.WorkThroughput[NodeID]
                 Undissem[mc][i,NodeID] = Net.Nodes[NodeID].Undissem
@@ -172,8 +179,9 @@ def simulate():
         Blacklist = [Net.Nodes[NodeID].Blacklist for NodeID in range(NUM_NODES)]
         latencies, latTimes = Net.tran_latency(latencies, latTimes)
         
-        TP.append(np.concatenate((np.zeros((1000, NUM_NODES)),(Throughput[mc][1000:,:]-Throughput[mc][:-1000,:])))/10)
-        WTP.append(np.concatenate((np.zeros((1000, NUM_NODES)),(WorkThroughput[mc][1000:,:]-WorkThroughput[mc][:-1000,:])))/10)
+        window = 50
+        TP.append(np.concatenate((np.zeros((int(window/STEP), NUM_NODES)),(Throughput[mc][int(window/STEP):,:]-Throughput[mc][:-int(window/STEP),:])))/window)
+        WTP.append(np.concatenate((np.zeros((int(window/STEP), NUM_NODES)),(WorkThroughput[mc][int(window/STEP):,:]-WorkThroughput[mc][:-int(window/STEP),:])))/window)
         #TP.append(np.convolve(np.zeros((Throughput[mc][500:,:]-Throughput[mc][:-500,:])))/5)
         Neighbours = [[Neighb.NodeID for Neighb in Node.Neighbours] for Node in Net.Nodes]
         del Net
@@ -212,6 +220,7 @@ def simulate():
                                       '\nstep = ' + str(STEP) +
                                       '\n\n# Network Parameters' +
                                       '\nnu = ' + str(NU) +
+                                      '\ngraph type = ' + GRAPH +
                                       '\nnumber of nodes = ' + str(NUM_NODES) +
                                       '\nnumber of neighbours = ' + str(NUM_NEIGHBOURS) +
                                       '\nrepdist = ' + str(REPDIST) +
@@ -245,7 +254,7 @@ def simulate():
     np.savetxt(dirstr+'/avgMeanDelay.csv', avgMeanDelay, delimiter=',')
     np.savetxt(dirstr+'/avgMeanVisDelay.csv', avgMeanVisDelay, delimiter=',')
     np.savetxt(dirstr+'/avgOldestTxAge.csv', avgOTA, delimiter=',')
-    np.savetxt(dirstr+'/adjlist.csv', np.asarray(Neighbours), delimiter=',')
+    #np.savetxt(dirstr+'/adjlist.csv', np.asarray(Neighbours), delimiter=',')
     f = open(dirstr+'/blacklist.csv','w')
     with f:
         writer = csv.writer(f)
@@ -370,6 +379,7 @@ def plot_results(dirstr):
     avgUndissem = np.loadtxt(dirstr+'/avgUndissem.csv', delimiter=',')
     avgMeanDelay = np.loadtxt(dirstr+'/avgMeanDelay.csv', delimiter=',')
     avgOTA = np.loadtxt(dirstr+'/avgOldestTxAge.csv', delimiter=',')
+    avgDefs = np.loadtxt(dirstr+'/avgDefs.csv', delimiter=',')
     latencies = []
     ServTimes = []
     ArrTimes = []
@@ -391,9 +401,8 @@ def plot_results(dirstr):
         #ArrTimes.append([np.loadtxt(dirstr+'/ArrTimes'+str(NodeID)+'.csv', delimiter=',')])
     """
     Plot results
-    """
-    
-        
+    """       
+    window = 50
     fig1, ax1 = plt.subplots(2,1, sharex=True, figsize=(8,8))
     ax1[0].title.set_text('Dissemination Rate')
     ax1[1].title.set_text('Scaled Dissemination Rate')
@@ -412,14 +421,14 @@ def plot_results(dirstr):
         else:
             marker = None
         if MODE[NodeID]==1:
-            ax1[0].plot(np.arange(10, SIM_TIME, STEP), avgTP[1000:,NodeID], linewidth=5*REP[NodeID]/REP[0], color='tab:blue', marker=marker, markevery=0.1)
-            ax1[1].plot(np.arange(10, SIM_TIME, STEP), avgTP[1000:,NodeID]*sum(REP)/(NU*REP[NodeID]), linewidth=5*REP[NodeID]/REP[0], color='tab:blue', marker=marker, markevery=0.1)
+            ax1[0].plot(np.arange(window, SIM_TIME, STEP), avgTP[int(window/STEP):,NodeID], linewidth=5*REP[NodeID]/REP[0], color='tab:blue', marker=marker, markevery=0.1)
+            ax1[1].plot(np.arange(window, SIM_TIME, STEP), avgTP[int(window/STEP):,NodeID]*sum(REP)/(NU*REP[NodeID]), linewidth=5*REP[NodeID]/REP[0], color='tab:blue', marker=marker, markevery=0.1)
         if MODE[NodeID]==2:
-            ax1[0].plot(np.arange(10, SIM_TIME, STEP), avgTP[1000:,NodeID], linewidth=5*REP[NodeID]/REP[0], color='tab:red', marker=marker, markevery=0.1)
-            ax1[1].plot(np.arange(10, SIM_TIME, STEP), avgTP[1000:,NodeID]*sum(REP)/(NU*REP[NodeID]), linewidth=5*REP[NodeID]/REP[0], color='tab:red', marker=marker, markevery=0.1)
+            ax1[0].plot(np.arange(window, SIM_TIME, STEP), avgTP[int(window/STEP):,NodeID], linewidth=5*REP[NodeID]/REP[0], color='tab:red', marker=marker, markevery=0.1)
+            ax1[1].plot(np.arange(window, SIM_TIME, STEP), avgTP[int(window/STEP):,NodeID]*sum(REP)/(NU*REP[NodeID]), linewidth=5*REP[NodeID]/REP[0], color='tab:red', marker=marker, markevery=0.1)
         if MODE[NodeID]>2:
-            ax1[0].plot(np.arange(10, SIM_TIME, STEP), avgTP[1000:,NodeID], linewidth=5*REP[NodeID]/REP[0], color='tab:green', marker=marker, markevery=0.1)
-            ax1[1].plot(np.arange(10, SIM_TIME, STEP), avgTP[1000:,NodeID]*sum(REP)/(NU*REP[NodeID]), linewidth=5*REP[NodeID]/REP[0], color='tab:green', marker=marker, markevery=0.1)
+            ax1[0].plot(np.arange(window, SIM_TIME, STEP), avgTP[int(window/STEP):,NodeID], linewidth=5*REP[NodeID]/REP[0], color='tab:green', marker=marker, markevery=0.1)
+            ax1[1].plot(np.arange(window, SIM_TIME, STEP), avgTP[int(window/STEP):,NodeID]*sum(REP)/(NU*REP[NodeID]), linewidth=5*REP[NodeID]/REP[0], color='tab:green', marker=marker, markevery=0.1)
             mal = True
     if mal:
         ModeLines = [Line2D([0],[0],color='tab:blue', lw=4), Line2D([0],[0],color='tab:red', lw=4), Line2D([0],[0],color='tab:green', lw=4)]
@@ -435,7 +444,8 @@ def plot_results(dirstr):
     fig2, ax2 = plt.subplots(figsize=(8,4))
     ax2.grid(linestyle='--')
     ax2.set_xlabel('Time (sec)')
-    ax2.plot(np.arange(10, SIM_TIME, STEP), np.sum(avgTP[1000:,:], axis=1), color = 'black')
+    ax2.plot(np.arange(window, SIM_TIME, STEP), np.sum(avgTP[int(window/STEP):,:], axis=1), color = 'black')
+    ax2.set_ylim((0,1.1*NU))
     ax22 = ax2.twinx()
     ax22.plot(np.arange(0, SIM_TIME, 1), avgMeanDelay, color='tab:gray')    
     ax2.tick_params(axis='y', labelcolor='black')
@@ -458,12 +468,13 @@ def plot_results(dirstr):
     plot_cdf(inboxLatencies, ax3a)
     plt.savefig(dirstr+'/InboxLatency.png', bbox_inches='tight')
     '''
+    '''
     fig4, ax4 = plt.subplots(figsize=(8,4))
     ax4.grid(linestyle='--')
     ax4.set_xlabel('Time (sec)')
     ax4.set_ylabel(r'$\lambda_i$')
     ax4.plot(np.arange(0, SIM_TIME, STEP), np.sum(avgLmds, axis=1), color='tab:blue')
-    '''
+    
     for NodeID in range(NUM_NODES):
         if MODE[NodeID]==1:
             ax4.plot(np.arange(0, SIM_TIME, STEP), avgLmds[:,NodeID], linewidth=5*REP[NodeID]/REP[0], color='tab:blue')
@@ -471,8 +482,9 @@ def plot_results(dirstr):
             ax4.plot(np.arange(0, SIM_TIME, STEP), avgLmds[:,NodeID], linewidth=5*REP[NodeID]/REP[0], color='tab:red')
         if MODE[NodeID]==3:
             ax4.plot(np.arange(0, SIM_TIME, STEP), avgLmds[:,NodeID], linewidth=5*REP[NodeID]/REP[0], color='tab:green')
-    '''
+    
     plt.savefig(dirstr+'/IssueRates.png', bbox_inches='tight')
+    '''
     
     fig5, ax5 = plt.subplots(figsize=(8,4))
     ax5.grid(linestyle='--')
@@ -505,11 +517,11 @@ def plot_results(dirstr):
     ax5.set_xlim(0, SIM_TIME)
     
     plt.savefig(dirstr+'/AvgInboxLenMA.png', bbox_inches='tight')
-    
+    """
     fig5, ax5 = plt.subplots(figsize=(8,4))
     ax5.grid(linestyle='--')
     ax5.set_xlabel('Time (sec)')
-    ax5.set_ylabel('Solidification Requests Pending')
+    ax5.set_ylabel('Deficits at Node 6')
     N=100
     for NodeID in range(NUM_NODES):
         if MODE[NodeID]==1:
@@ -521,7 +533,22 @@ def plot_results(dirstr):
     ax5.set_xlim(0, SIM_TIME)
     
     plt.savefig(dirstr+'/AvgSolReq.png', bbox_inches='tight')
+    """
+    fig5, ax5 = plt.subplots(figsize=(8,4))
+    ax5.grid(linestyle='--')
+    ax5.set_xlabel('Time (sec)')
+    ax5.set_ylabel('Deficits at Node 6')
+    N=100
+    for NodeID in range(NUM_NODES):
+        if MODE[NodeID]==1:
+            ax5.plot(np.arange(0, SIM_TIME, STEP), avgDefs[:,NodeID], color='tab:blue', linewidth=5*REP[NodeID]/REP[0])
+        if MODE[NodeID]==2:
+            ax5.plot(np.arange(0, SIM_TIME, STEP), avgDefs[:,NodeID], color='tab:red', linewidth=5*REP[NodeID]/REP[0])
+        if MODE[NodeID]>2:
+            ax5.plot(np.arange(0, SIM_TIME, STEP), avgDefs[:,NodeID], color='tab:green', linewidth=5*REP[NodeID]/REP[0])
+    ax5.set_xlim(0, SIM_TIME)
     
+    plt.savefig(dirstr+'/avgDefs.png', bbox_inches='tight')
     '''
     fig5a, ax5a = plt.subplots(figsize=(8,4))
     ax5a.grid(linestyle='--')
@@ -579,12 +606,13 @@ def plot_results(dirstr):
     ax7.set_xlabel('Inter-service time (sec)')
     plt.savefig(dirstr+'/InterServiceTimes.png', bbox_inches='tight')
     '''
+    '''
     fig8, ax8 = plt.subplots(figsize=(8,4))
     #plot_cdf_exp(IATimes, ax8)
     ax8.grid(linestyle='--')
     ax8.set_xlabel('Inter-arrival time (sec)')
     plt.savefig(dirstr+'/InterArrivalTimes.png', bbox_inches='tight')
-    
+    '''
     fig9, ax9 = plt.subplots(figsize=(8,4))
     ax9.grid(linestyle='--')
     ax9.plot(np.arange(0, SIM_TIME, STEP), avgOTA, color='black')
@@ -777,8 +805,7 @@ class Node:
         # check PoW completion
         while self.IssuedTrans:
             Tran = self.IssuedTrans.pop(0)
-            p = Packet(self, self, Tran, Tran.IssueTime)
-            p.EndTime = Tran.IssueTime
+            p = Packet(self, self, Tran, Tran.IssueTime, Tran.IssueTime)
             if MODE[self.NodeID]>2: # malicious don't consider own txs for scheduling
                 self.add_to_ledger(self, Tran, Tran.IssueTime)
             else:
@@ -809,7 +836,11 @@ class Node:
 
         # process according to global rate Nu
         while self.Inbox.SolidPackets or self.Inbox.Scheduled:
-            nextSchedTime = max(self.LastScheduleTime+(self.LastScheduleWork/NU), self.Inbox.SolidPackets[0].EndTime)
+            if self.Inbox.Scheduled:
+                nextSchedTime = self.LastScheduleTime+(self.LastScheduleWork/NU)
+            else:
+                nextSchedTime = max(self.LastScheduleTime+(self.LastScheduleWork/NU), self.Inbox.SolidPackets[0].EndTime)
+                
             if nextSchedTime<Time+STEP:             
                 if SCHEDULING=='drr':
                     Packet = self.Inbox.drr_schedule(nextSchedTime)
@@ -879,7 +910,7 @@ class Node:
         Forward this transaction to all but the node it was received from
         '''
         if MODE[self.NodeID]==4:
-            neighb = np.random.randint(NUM_NEIGHBOURS)
+            neighb = np.random.randint(len(self.Neighbours))
             self.Network.send_data(self, self.Neighbours[neighb], Tran, Time)
         else:
             self.Network.broadcast_data(self, TxNode, Tran, Time)
@@ -1127,13 +1158,13 @@ class Packet:
     Object for sending data including TXs and back off notifications over
     comm channels
     """    
-    def __init__(self, TxNode, RxNode, Data, StartTime):
+    def __init__(self, TxNode, RxNode, Data, StartTime, EndTime = []):
         # can be a TX or a back off notification
         self.TxNode = TxNode
         self.RxNode = RxNode
         self.Data = Data
         self.StartTime = StartTime
-        self.EndTime = []
+        self.EndTime = EndTime
     
 class CommChannel:
     """
@@ -1209,15 +1240,32 @@ class Network:
             RowList = []
             for j in np.nditer(np.nonzero(self.A[i,:])):
                 self.Nodes[i].Neighbours.append(self.Nodes[j])
-                RowList.append(CommChannel(self.Nodes[i],self.Nodes[j],self.A[i][j]))
+                RowList.append(CommChannel(self.Nodes[i],self.Nodes[j],np.random.exponential(0.1)))
             self.CommChannels.append(RowList)
+    
+    def remove_node(self, Node):
+        Node.Neighbours = []
+        self.CommChannels[Node.NodeID] = []
+    
+    def add_node(self, Node):
+        EligNeighbs = [n for n in self.Nodes if (Node.NodeID not in n.Blacklist) and (n is not Node)]
+        if EligNeighbs:
+            print(len(EligNeighbs))
+            NewNeighbours = np.random.choice(EligNeighbs, size=min(len(EligNeighbs),NUM_NEIGHBOURS), replace=False)
+            for Neighbour in NewNeighbours:
+                Node.Neighbours.append(Neighbour)
+                Neighbour.Neighbours.append(Node)
+                self.CommChannels[Node.NodeID].append(CommChannel(Node, Neighbour, np.random.exponential(0.1)))
+                self.CommChannels[Neighbour.NodeID].append(CommChannel(Neighbour, Node, np.random.exponential(0.1)))
+            
     
     def send_data(self, TxNode, RxNode, Data, Time):
         """
         Send this data (TX or back off) to a specified neighbour
         """
-        CC = self.CommChannels[TxNode.NodeID][TxNode.Neighbours.index(RxNode)]
-        CC.send_packet(TxNode, RxNode, Data, Time)
+        if RxNode in TxNode.Neighbours:
+            CC = self.CommChannels[TxNode.NodeID][TxNode.Neighbours.index(RxNode)]
+            CC.send_packet(TxNode, RxNode, Data, Time)
         
     def broadcast_data(self, TxNode, LastTxNode, Data, Time):
         """
@@ -1236,6 +1284,11 @@ class Network:
         """
         for Node in self.Nodes:
             Node.issue_txs(Time)
+            if MODE[Node.NodeID]>2:
+                if len([Neighbour for Neighbour in Node.Neighbours if Node.NodeID in Neighbour.Blacklist])==NUM_NEIGHBOURS:
+                    self.remove_node(Node)
+                    self.add_node(Node)
+                
         """
         Move packets through all comm channels
         """
