@@ -14,7 +14,7 @@ from shutil import copyfile
 
 np.random.seed(0)
 # Simulation Parameters
-MONTE_CARLOS = 1
+MONTE_CARLOS = 20
 SIM_TIME = 180
 STEP = 0.01
 # Network Parameters
@@ -25,12 +25,16 @@ START_TIMES = 10*np.ones(NUM_NODES)
 REPDIST = 'zipf'
 if REPDIST=='zipf':
     # IOTA data rep distribution - Zipf s=0.9
-    REP = [(NUM_NODES+1)/((NodeID+1)**0.9) for NodeID in range(NUM_NODES)]
+    REP50 = [(51)/((NodeID+1)**0.9) for NodeID in range(50)]
+    REPN = [(NUM_NODES+1)/((NodeID+1)**0.9) for NodeID in range(NUM_NODES)]
+    REP = [(sum(REP50)/sum(REPN))*rep for rep in REPN]
 elif REPDIST=='uniform':
     # Permissioned System rep system?
     REP = np.ones(NUM_NODES, dtype=int)
 # Modes: 0 = inactive, 1 = content, 2 = best-effort, 3 = malicious
 MODE = [2-NodeID%3 for NodeID in range(NUM_NODES)]
+#MODE = [min(1,2-NodeID%3) for NodeID in range(NUM_NODES)]
+#MODE = [1 for NodeID in range(NUM_NODES)]
 #MODE = [3-(NodeID+1)%4 for NodeID in range(NUM_NODES)]
     
 #AVG_WORK = [2*rep/max(REP) for rep in REP
@@ -44,14 +48,15 @@ MAX_WORK = 1
 
 # Congestion Control Parameters
 ALPHA = 0.075
-BETA = 0.5
+BETA = 0.7
 TAU = 2
-MIN_TH = 1
+MIN_TH = 2
 MAX_TH = MIN_TH
-QUANTUM = [rep/sum(REP) for rep in REP]
+QUANTUM = [MAX_WORK*rep/sum(REP) for rep in REP]
 W_Q = 0.1
 P_B = 0.5
 W_MAX = 200
+GRAPH = 'regular'
 
 SCHEDULING = 'drr_lds'
     
@@ -69,13 +74,19 @@ def main():
         #simulate(dirstr)
     '''
     #dirstr = simulate()
-    #dirstr = 'data/2020-07-31_142752'
+    #dirstr = 'data/2020-12-15_173530' # PoW 105%
+    #dirstr = 'data/2020-12-14_150225' # PoW some inactive
+    #dirstr = 'data/2020-12-16_143912' # standard case
     #plot_results(dirstr)
     #plot_results('data/2020-07-23_213333')
     #plot_scheduler_comp('Data/2020-07-23_233549', 'Data/2020-07-23_213333')
-    #plot_ratesetter_comp('data/2020-07-24_132945', 'data/2020-07-23_213333', 'data/2020-07-24_153139') # changing beta
-    #plot_ratesetter_comp('data/2020-07-23_212831', 'data/2020-07-23_213333', 'data/2020-07-24_124532') # changing W
-    plot_ratesetter_comp('data/2020-07-23_213056', 'data/2020-07-23_213333', 'data/2020-07-24_154211') # changing alpha
+    #plot_ratesetter_comp('data/2020-12-15_214440', 'data/2020-12-16_143912', 'data/2020-12-16_144006') # changing beta
+    plot_ratesetter_comp('data/2020-12-16_143121', 'data/2020-12-16_143912', 'data/2020-12-16_143733') # changing W
+    #plot_ratesetter_comp('data/2020-12-16_143039', 'data/2020-12-16_143912', 'data/2020-12-16_143205') # changing alpha
+    #plot_ratesetter_comp('data/2020-12-16_143121', 'data/2020-12-14_150225', 'data/2020-12-15_173530') # PoW vs rep
+    #plot_ratesetter_comp('data/2020-12-14_150225', 'data/2020-12-16_212931', 'data/2020-12-15_173530') # PoW comp
+    #plot_ratesetter_comp('data/2021-01-04_103035', 'data/2020-12-16_143912', 'data/2021-01-04_115402') # changing |M|
+    
     winsound.Beep(2500, 1000) # beep to say sim is finished
     
 def simulate():
@@ -114,7 +125,12 @@ def simulate():
         Comment out one of the below lines for either random k-regular graph or a
         graph from an adjlist txt file i.e. from the autopeering simulator
         """
-        G = nx.random_regular_graph(NUM_NEIGHBOURS, NUM_NODES)
+        if GRAPH=='regular':
+            G = nx.random_regular_graph(NUM_NEIGHBOURS, NUM_NODES) # random regular graph
+        elif GRAPH=='complete':
+            G = nx.complete_graph(NUM_NODES) # complete graph
+        elif GRAPH=='cycle':
+            G = nx.cycle_graph(NUM_NODES) # cycle graph
         #G = nx.read_adjlist('input_adjlist.txt', delimiter=' ')
         # Get adjacency matrix and weight by delay at each channel
         ChannelDelays = 0.05*np.ones((NUM_NODES, NUM_NODES))+0.1*np.random.rand(NUM_NODES, NUM_NODES)
@@ -193,6 +209,7 @@ def simulate():
                                       '\nnu = ' + str(NU) +
                                       '\nnumber of nodes = ' + str(NUM_NODES) +
                                       '\nnumber of neighbours = ' + str(NUM_NEIGHBOURS) +
+                                      '\ngraph topology = ' + GRAPH +
                                       '\nrepdist = ' + str(REPDIST) +
                                       '\nmodes = ' + str(MODE) +
                                       '\niot = ' + str(IOT) +
@@ -239,7 +256,7 @@ def plot_ratesetter_comp(dir1, dir2, dir3):
     axt = ax.twinx()  
     ax.tick_params(axis='y', labelcolor='black')
     axt.tick_params(axis='y', labelcolor='tab:gray')
-    ax.set_ylabel('Dissemination rate (Work/sec)', color='black')
+    ax.set_ylabel(r'$DR/\nu \quad (\%)$', color='black')
     axt.set_ylabel('Mean Latency (sec)', color='tab:gray')
     
     avgTP1 = np.loadtxt(dir1+'/avgTP.csv', delimiter=',')
@@ -249,21 +266,28 @@ def plot_ratesetter_comp(dir1, dir2, dir3):
     avgTP3 = np.loadtxt(dir3+'/avgTP.csv', delimiter=',')
     avgMeanDelay3 = np.loadtxt(dir3+'/avgMeanDelay.csv', delimiter=',')
     
-    markerevery = 200
-    ax.plot(np.arange(10, SIM_TIME, STEP), np.sum(avgTP1[1000:,:], axis=1), color = 'black', marker = 'o', markevery=markerevery)
+    markerevery = 500
+    ax.plot(np.arange(10, SIM_TIME, STEP), 100*np.sum(avgTP1[1000:,:]/NU, axis=1), color = 'black', marker = 'o', markevery=markerevery)
     axt.plot(np.arange(0, SIM_TIME, 1), avgMeanDelay1, color='tab:gray', marker = 'o', markevery=int(markerevery*STEP)) 
-    ax.plot(np.arange(10, SIM_TIME, STEP), np.sum(avgTP2[1000:,:], axis=1), color = 'black', marker = 'x', markevery=markerevery)
+    ax.plot(np.arange(10, SIM_TIME, STEP), 100*np.sum(avgTP2[1000:,:]/NU, axis=1), color = 'black', marker = 'x', markevery=markerevery)
     axt.plot(np.arange(0, SIM_TIME, 1), avgMeanDelay2, color='tab:gray', marker = 'x', markevery=int(markerevery*STEP))  
-    ax.plot(np.arange(10, SIM_TIME, STEP), np.sum(avgTP3[1000:,:], axis=1), color = 'black', marker = '^', markevery=markerevery)
+    ax.plot(np.arange(10, SIM_TIME, STEP), 100*np.sum(avgTP3[1000:,:]/NU, axis=1), color = 'black', marker = '^', markevery=markerevery)
     axt.plot(np.arange(0, SIM_TIME, 1), avgMeanDelay3, color='tab:gray', marker = '^', markevery=int(markerevery*STEP))  
+    ax.set_ylim([0,110])
+    axt.set_ylim([0,9])
     
     ModeLines = [Line2D([0],[0],color='black', linestyle=None, marker='o'), Line2D([0],[0],color='black', linestyle=None, marker='x'), Line2D([0],[0],color='black', linestyle=None, marker='^')]
-    ax.legend(ModeLines, [r'$A=0.05$', r'$A=0.075$', r'$A=0.1$'], loc='lower right')
-    ax.set_title(r'$\beta=0.7, \quad W=2$')
+    #ax.legend(ModeLines, [r'$A=0.05$', r'$A=0.075$', r'$A=0.1$'], loc='lower right')
+    #ax.set_title(r'$\beta=0.7, \quad W=2$')
     #ax.legend(ModeLines, [r'$\beta=0.5$', r'$\beta=0.7$', r'$\beta=0.9$'], loc='lower right')
     #ax.set_title(r'$A=0.075, \quad W=2$')
-    #ax.legend(ModeLines, [r'$W=1$', r'$W=2$', r'$W=3$'], loc='lower right')
-    #ax.set_title(r'$A=0.075, \quad \beta=0.7$')
+    ax.legend(ModeLines, [r'$W=1$', r'$W=2$', r'$W=3$'], loc='lower right')
+    ax.set_title(r'$A=0.075, \quad \beta=0.7$')
+    #ax.legend(ModeLines, ['Our algorithm', 'PoW case 1', 'PoW case 2'], loc='right')
+    #ax.set_title('Our algorithm vs. PoW')
+    #ax.legend(ModeLines, [r'$|\mathcal{M}|=25$', r'$|\mathcal{M}|=50$', r'$|\mathcal{M}|=75$'], loc='lower right', ncol=1)
+    #ax.set_title(r'$A=0.075, \quad \beta=0.7, \quad W=2$')
+    #ax.legend(ModeLines, ['PoW case 1', 'PoW case 2', 'PoW case 3'], loc='right')
     
     dirstr = 'data/'+ strftime("%Y-%m-%d_%H%M%S", gmtime())
     os.makedirs(dirstr, exist_ok=True)
@@ -392,13 +416,15 @@ def plot_results(dirstr):
     fig2, ax2 = plt.subplots(figsize=(8,4))
     ax2.grid(linestyle='--')
     ax2.set_xlabel('Time (sec)')
-    ax2.plot(np.arange(10, SIM_TIME, STEP), np.sum(avgTP[1000:,:], axis=1), color = 'black')
+    ax2.plot(np.arange(10, SIM_TIME, STEP), 100*np.sum(avgTP[1000:,:], axis=1)/NU, color = 'black')
     ax22 = ax2.twinx()
     ax22.plot(np.arange(0, SIM_TIME, 1), avgMeanDelay, color='tab:gray')    
     ax2.tick_params(axis='y', labelcolor='black')
     ax22.tick_params(axis='y', labelcolor='tab:gray')
-    ax2.set_ylabel('Dissemination rate (Work/sec)', color='black')
+    ax2.set_ylabel(r'$DR/\nu \quad (\%)$', color='black')
+    ax2.set_ylim([0,110])
     ax22.set_ylabel('Mean Latency (sec)', color='tab:gray')
+    #ax22.set_ylim([0,2])
     fig2.tight_layout()
     plt.savefig(dirstr+'/Throughput.png', bbox_inches='tight')
     
@@ -830,11 +856,12 @@ class Node:
                 Buffer Management
                 '''
                 self.Inbox.Work[NodeID] += Packet.Data.Work
+                '''
                 if sum(self.Inbox.Work)>W_MAX:
                     ScaledWork = np.array([self.Inbox.Work[NodeID]/REP[NodeID] for NodeID in range(NUM_NODES)])
                     MalNodeID = np.argmax(ScaledWork)
                     self.Inbox.remove_packet(self.Inbox.Packets[MalNodeID][0])
-                
+                '''
 class Inbox:
     """
     Object for holding packets in different channels corresponding to different nodes
@@ -894,6 +921,7 @@ class Inbox:
             while not self.Scheduled:
                 if self.Deficit[self.RRNodeID]<MAX_WORK:
                     self.Deficit[self.RRNodeID] += QUANTUM[self.RRNodeID]
+                    #self.Deficit[self.RRNodeID] = min(MAX_WORK, self.Deficit[self.RRNodeID]+QUANTUM[self.RRNodeID])
                 '''
                 if self.Packets[self.RRNodeID]:
                     self.Deficit[self.RRNodeID] += QUANTUM[self.RRNodeID]
@@ -1088,6 +1116,3 @@ class Network:
                 
 if __name__ == "__main__":
         main()
-        
-    
-    
