@@ -8,13 +8,14 @@ from matplotlib.lines import Line2D
 import networkx as nx
 from random import sample
 import os
-import winsound
+import sys
 from time import gmtime, strftime
 from shutil import copyfile
+import copy
 
 np.random.seed(0)
 # Simulation Parameters
-MONTE_CARLOS = 20
+MONTE_CARLOS = 1
 SIM_TIME = 180
 STEP = 0.01
 # Network Parameters
@@ -33,14 +34,6 @@ elif REPDIST=='uniform':
     REP = np.ones(NUM_NODES, dtype=int)
 # Modes: 0 = inactive, 1 = content, 2 = best-effort, 3 = malicious
 MODE = [2-NodeID%3 for NodeID in range(NUM_NODES)]
-#MODE = [min(1,2-NodeID%3) for NodeID in range(NUM_NODES)]
-#MODE = [1 for NodeID in range(NUM_NODES)]
-#MODE = [3-(NodeID+1)%4 for NodeID in range(NUM_NODES)]
-    
-#AVG_WORK = [2*rep/max(REP) for rep in REP
-#AVG_WORK = np.ones(NUM_NODES)
-#IOT = np.concatenate((np.zeros(int(NUM_NODES/2)), np.ones(int(NUM_NODES/2))))
-#IOT = [NodeID%2 for NodeID in range(NUM_NODES)]
 IOT = np.zeros(NUM_NODES)
 IOTLOW = 0.5
 IOTHIGH = 1
@@ -59,35 +52,16 @@ W_MAX = 200
 GRAPH = 'regular'
 
 SCHEDULING = 'drr_lds'
+CONF_WEIGHT = 10
     
 def main():
     '''
     Create directory for storing results with these parameters
     '''
-    '''
-    dirstr = 'data/sched='+SCHEDULING+'/rep='+REPDIST+'/nu='+str(NU)+'/alpha='+str(ALPHA)+'/beta='+str(BETA)+'/RED='+str(MIN_TH)+'_'+str(MAX_TH)+'/w='+str(W_Q)+'/p_b='+str(P_B)+'/numnodes='+str(NUM_NODES)+'_' +str(NUM_NEIGHBOURS)+'/simtime='+str(SIM_TIME)+'/nmc='+str(MONTE_CARLOS)
-    if not Path(dirstr).exists():
-        print("Simulating")
-        simulate(dirstr)
-    else:
-        print("Simulation already done for these parameters")
-        #simulate(dirstr)
-    '''
-    #dirstr = simulate()
-    #dirstr = 'data/2020-12-15_173530' # PoW 105%
-    #dirstr = 'data/2020-12-14_150225' # PoW some inactive
-    #dirstr = 'data/2020-12-16_143912' # standard case
-    #plot_results(dirstr)
-    #plot_results('data/2020-07-23_213333')
-    #plot_scheduler_comp('Data/2020-07-23_233549', 'Data/2020-07-23_213333')
-    #plot_ratesetter_comp('data/2020-12-15_214440', 'data/2020-12-16_143912', 'data/2020-12-16_144006') # changing beta
-    plot_ratesetter_comp('data/2020-12-16_143121', 'data/2020-12-16_143912', 'data/2020-12-16_143733') # changing W
-    #plot_ratesetter_comp('data/2020-12-16_143039', 'data/2020-12-16_143912', 'data/2020-12-16_143205') # changing alpha
-    #plot_ratesetter_comp('data/2020-12-16_143121', 'data/2020-12-14_150225', 'data/2020-12-15_173530') # PoW vs rep
-    #plot_ratesetter_comp('data/2020-12-14_150225', 'data/2020-12-16_212931', 'data/2020-12-15_173530') # PoW comp
-    #plot_ratesetter_comp('data/2021-01-04_103035', 'data/2020-12-16_143912', 'data/2021-01-04_115402') # changing |M|
+    dirstr = simulate()
+    plot_results(dirstr)
     
-    winsound.Beep(2500, 1000) # beep to say sim is finished
+    sys.stdout.write('\a')
     
 def simulate():
     """
@@ -200,7 +174,7 @@ def simulate():
     """
     Create a directory for these results and save them
     """
-    dirstr = 'data/'+ strftime("%Y-%m-%d_%H%M%S", gmtime())
+    dirstr = os.path.dirname(os.path.realpath(__file__)) + '/results/'+ strftime("%Y-%m-%d_%H%M%S", gmtime())
     os.makedirs(dirstr, exist_ok=True)
     np.savetxt(dirstr+'/aaconfig.txt', ['MCs = ' + str(MONTE_CARLOS) +
                                       '\nsimtime = ' + str(SIM_TIME) +
@@ -289,7 +263,7 @@ def plot_ratesetter_comp(dir1, dir2, dir3):
     #ax.set_title(r'$A=0.075, \quad \beta=0.7, \quad W=2$')
     #ax.legend(ModeLines, ['PoW case 1', 'PoW case 2', 'PoW case 3'], loc='right')
     
-    dirstr = 'data/'+ strftime("%Y-%m-%d_%H%M%S", gmtime())
+    dirstr = os.path.dirname(os.path.realpath(__file__)) + '/results/'+ strftime("%Y-%m-%d_%H%M%S", gmtime())
     os.makedirs(dirstr, exist_ok=True)
     
     copyfile(dir1+'/aaconfig.txt', dirstr+'/config1.txt')
@@ -327,7 +301,7 @@ def plot_scheduler_comp(dir1, dir2):
     xlim = plot_cdf(latencies1, ax[0])
     plot_cdf(latencies2, ax[1], xlim)
     
-    dirstr = 'data/'+ strftime("%Y-%m-%d_%H%M%S", gmtime())
+    dirstr = os.path.dirname(os.path.realpath(__file__)) + '/results/'+ strftime("%Y-%m-%d_%H%M%S", gmtime())
     os.makedirs(dirstr, exist_ok=True)
     
     copyfile(dir1+'/aaconfig.txt', dirstr+'/config1.txt')
@@ -630,21 +604,74 @@ def plot_cdf_exp(data, ax):
 
 class Transaction:
     """
-    Object to simulate a transaction its edges in the DAG
+    Object to simulate a transaction and its edges in the DAG
     """
-    def __init__(self, IssueTime, Parents, Node, Work=0, Index=None, VisibleTime=None):
+    def __init__(self, IssueTime, Parents, Node, Network, Work=0, Index=None, VisibleTime=None):
         self.IssueTime = IssueTime
         self.VisibleTime = VisibleTime
         self.Children = []
         self.Parents = Parents
-        self.Index = Index
-        self.InformedNodes = 0
-        self.GlobalSolidTime = []
+        self.Network = Network
+        self.Index = Network.TranIndex
+        Network.TranIndex += 1
+        Network.InformedNodes[self.Index] = 0
         self.Work = Work
+        self.AWeight = Work
+        self.LastAWUpdate = self
         if Node:
             self.NodeID = Node.NodeID # signature of issuing node
+            self.Eligible = False
+            self.Confirmed = False
         else: # genesis
             self.NodeID = []
+            self.Eligible = True
+            self.Confirmed = True
+
+    def mark_confirmed(self, Node):
+        self.Confirmed = True
+        self.mark_eligible(Node)
+
+    def mark_eligible(self, Node):
+        # mark this transaction as eligible and modify the tipset accordingly
+        self.Eligible = True
+        # add this to tipset if no eligible children
+        isTip = True
+        for c in self.Children:
+            if c.Eligible:
+                isTip = False
+                break
+        if isTip:
+            Node.TipsSet.append(self)
+        
+        # remove parents from tip set
+        if self.Parents:
+            for p in self.Parents:
+                p.Children.append(Tran)
+                if p in self.TipsSet:
+                    self.TipsSet.remove(p)
+                else:
+                    continue
+    
+    def updateAW(self, updateTran=None, Work=None):
+        if updateTran is None:
+            assert Work is None
+            updateTran = self
+            Work = self.Work
+        else:
+            assert Work is not None
+            self.AWeight += Work
+        self.LastAWUpdate = updateTran
+        for p in self.Parents:
+            if p.AWeight < CONF_WEIGHT and p.LastAWUpdate != updateTran:
+                p.updateAW(updateTran, Work)
+    
+    def copy(self):
+        Tran = copy(self)
+        Tran.Children = []
+
+        return Tran
+
+
 
 class Node:
     """
@@ -690,7 +717,7 @@ class Node:
                     else:
                         Work = 1
                     self.LastIssueWork = Work
-                    self.IssuedTrans.append(Transaction(self.LastIssueTime, Parents, self, Work))
+                    self.IssuedTrans.append(Transaction(self.LastIssueTime, Parents, self, self.Network, Work=Work))
             elif MODE[self.NodeID]==1:
                 if IOT[self.NodeID]:
                     Work = np.random.uniform(IOTLOW,IOTHIGH)
@@ -700,24 +727,23 @@ class Node:
                 for t in times:
                     Parents = self.select_tips()
                     #Work = np.random.uniform(AVG_WORK[self.NodeID]-0.5, AVG_WORK[self.NodeID]+0.5)
-                    self.IssuedTrans.append(Transaction(t, Parents, self, Work))
+                    self.IssuedTrans.append(Transaction(t, Parents, self, self.Network, Work=Work))
             else:
                 Work = 1
                 times = np.sort(np.random.uniform(Time, Time+STEP, np.random.poisson(STEP*self.Lambda/Work)))
                 for t in times:
                     Parents = self.select_tips()
                     #Work = np.random.uniform(AVG_WORK[self.NodeID]-0.5, AVG_WORK[self.NodeID]+0.5)
-                    self.IssuedTrans.append(Transaction(t, Parents, self, Work))
+                    self.IssuedTrans.append(Transaction(t, Parents, self, self.Network, Work=Work))
                 
         # check PoW completion
         while self.IssuedTrans:
             Tran = self.IssuedTrans.pop(0)
             p = Packet(self, self, Tran, Tran.IssueTime)
             p.EndTime = Tran.IssueTime
+            self.book(p, Tran.IssueTime)
             if MODE[self.NodeID]==3: # malicious don't consider own txs for scheduling
-                self.add_to_ledger(self, Tran, Tran.IssueTime)
-            else:
-                self.add_to_inbox(p, Tran.IssueTime)
+                self.schedule(self, Tran, Tran.IssueTime)
     
     def select_tips(self):
         """
@@ -750,8 +776,7 @@ class Node:
                 elif SCHEDULING=='fifo':
                     Packet = self.Inbox.fifo_schedule(nextSchedTime)
                 if Packet is not None:
-                    if Packet.Data not in self.Ledger:
-                        self.add_to_ledger(Packet.TxNode, Packet.Data, nextSchedTime)
+                    self.schedule(Packet.TxNode, Packet.Data, nextSchedTime)
                     # update AIMD
                     #if Packet.Data.NodeID==self.NodeID:
                     self.Network.Nodes[Packet.Data.NodeID].InboxLatencies.append(nextSchedTime-Packet.EndTime)
@@ -765,38 +790,55 @@ class Node:
             else:
                 break
     
-    def add_to_ledger(self, TxNode, Tran, Time):
+    def schedule(self, TxNode, Tran: Transaction, Time):
+        # add to eligible set
+        Tran.mark_eligible(self)
+
+        # broadcast the packet
+        self.Network.broadcast_data(self, TxNode, Tran, Time)
+
+    def parse(self, Packet, Time):
         """
-        Adds the transaction to the local copy of the ledger and broadcast it
+        Not fully implemented yet
+        Simply makes a copy of the transaction and then calls the solidifier
         """
+        Packet.Data = Packet.Data.copy()
+        self.solidify(Packet, Time)
+    
+    def solidify(self, Packet, Time):
+        """
+        Not implemented yet, just calls the booker
+        """
+        self.book(Packet, Time)
+
+    def book(self, Packet, Time):
+        """
+        Adds the transaction to the local copy of the ledger
+        """
+        # make a shallow copy of the transaction and initialise metadata
+        Tran = Packet.Data
+        assert isinstance(Tran, Transaction)
         self.Ledger.append(Tran)
+        for p in Tran.Parents:
+            p.Children.append(Tran)
+        Tran.updateAW()
+        
         if Tran.NodeID==self.NodeID:
             self.Undissem += 1
             self.UndissemWork += Tran.Work
             Tran.VisibleTime = Time
         # mark this TX as received by this node
-        Tran.InformedNodes += 1
-        if Tran.InformedNodes==NUM_NODES:
+        self.Network.InformedNodes[Tran.Index] += 1
+        if self.Network.InformedNodes[Tran.Index]==NUM_NODES:
             self.Network.Throughput[Tran.NodeID] += 1
             self.Network.WorkThroughput[Tran.NodeID] += Tran.Work
             self.Network.TranDelays.append(Time-Tran.IssueTime)
             self.Network.VisTranDelays.append(Time-Tran.VisibleTime)
-            self.Network.DissemTimes.append(Time)
-            Tran.GlobalSolidTime = Time
+            self.Network.DissemTimes[Tran.Index] = Time
             self.Network.Nodes[Tran.NodeID].Undissem -= 1
             self.Network.Nodes[Tran.NodeID].UndissemWork -= Tran.Work
-            
-        if not Tran.Children:
-            self.TipsSet.append(Tran)
-        if Tran.Parents:
-            for Parent in Tran.Parents:
-                Parent.Children.append(Tran)
-                if Parent in self.TipsSet:
-                    self.TipsSet.remove(Parent)
-                else:
-                    continue
-        # broadcast the packet
-        self.Network.broadcast_data(self, TxNode, Tran, Time)
+
+        self.enqueue(Packet, Time)
     
     def check_congestion(self, Time):
         """
@@ -833,12 +875,12 @@ class Node:
         else:
             self.Lambda = 0
             
-    def add_to_inbox(self, Packet, Time):
+    def enqueue(self, Packet, Time):
         """
-        Add to inbox if not already received and/or processed
+        Add to inbox if not already in inbox or already eligible
         """
         if Packet.Data not in self.Inbox.Trans:
-            if Packet.Data not in self.Ledger:
+            if not Packet.Data.Eligible:
                 self.Inbox.AllPackets.append(Packet)
                 NodeID = Packet.Data.NodeID
                 if NodeID in self.Inbox.Empty:
@@ -853,15 +895,15 @@ class Node:
                     #self.Inbox.Avg = (1-W_Q)*self.Inbox.Avg + W_Q*len(self.Inbox.Packets[self.NodeID])
                     self.check_congestion(Time)
                 '''
-                Buffer Management
+                Buffer Management - Drop head queue
                 '''
                 self.Inbox.Work[NodeID] += Packet.Data.Work
-                '''
+                
                 if sum(self.Inbox.Work)>W_MAX:
                     ScaledWork = np.array([self.Inbox.Work[NodeID]/REP[NodeID] for NodeID in range(NUM_NODES)])
                     MalNodeID = np.argmax(ScaledWork)
                     self.Inbox.remove_packet(self.Inbox.Packets[MalNodeID][0])
-                '''
+                
 class Inbox:
     """
     Object for holding packets in different channels corresponding to different nodes
@@ -1038,8 +1080,8 @@ class CommChannel:
         Packet.EndTime = Time
         if isinstance(Packet.Data, Transaction):
             # if this is a transaction, add the Packet to Inbox
-            self.RxNode.add_to_inbox(Packet, Time)
-        else: 
+            self.RxNode.parse(Packet, Time)
+        else:
             # else this is a back off notification
             self.RxNode.process_cong_notif(Packet, Time)
         PacketIndex = self.Packets.index(Packet)
@@ -1052,14 +1094,16 @@ class Network:
     """
     def __init__(self, AdjMatrix):
         self.A = AdjMatrix
+        self.TranIndex = 0
+        self.InformedNodes = {}
         self.Nodes = []
         self.CommChannels = []
         self.Throughput = [0 for NodeID in range(NUM_NODES)]
         self.WorkThroughput = [0 for NodeID in range(NUM_NODES)]
         self.TranDelays = []
         self.VisTranDelays = []
-        self.DissemTimes = []
-        Genesis = Transaction(0, [], [])
+        self.DissemTimes = {}
+        Genesis = Transaction(0, [], [], self)
         # Create nodes
         for i in range(np.size(self.A,1)):
             self.Nodes.append(Node(self, i, Genesis))
@@ -1109,9 +1153,9 @@ class Network:
     
     def tran_latency(self, latencies, latTimes):
         for Tran in self.Nodes[0].Ledger:
-            if Tran.GlobalSolidTime and Tran.IssueTime>20:
-                latencies[Tran.NodeID].append(Tran.GlobalSolidTime-Tran.IssueTime)
-                latTimes[Tran.NodeID].append(Tran.GlobalSolidTime)
+            if Tran.Index in self.DissemTimes and Tran.IssueTime>20:
+                latencies[Tran.NodeID].append(self.DissemTimes[Tran.Index]-Tran.IssueTime)
+                latTimes[Tran.NodeID].append(self.DissemTimes[Tran.Index])
         return latencies, latTimes
                 
 if __name__ == "__main__":
