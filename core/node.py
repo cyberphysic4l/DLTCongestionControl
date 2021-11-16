@@ -12,7 +12,7 @@ class Node:
     def __init__(self, Network, NodeID, Genesis, PoWDelay = 1):
         self.TipsSet = [Genesis]
         self.Ledger = [Genesis]
-        self.LedgerTranIDs = []
+        self.LedgerTranIDs = [0]
         self.Neighbours = []
         self.Network = Network
         self.Inbox = Inbox(self)
@@ -137,13 +137,17 @@ class Node:
         Not fully implemented yet
         Simply makes a copy of the transaction and then calls the solidifier
         """
-        Packet.Data = Packet.Data.copy()
         self.solidify(Packet, Time)
-    
+
     def solidify(self, Packet, Time):
         """
         Not implemented yet, just calls the booker
         """
+        Packet.Data = Packet.Data.copy(self)
+        Tran = Packet.Data
+        assert isinstance(Tran, Transaction)
+        Tran.solidify()
+                
         self.book(Packet, Time)
 
     def book(self, Packet, Time):

@@ -18,6 +18,7 @@ class Transaction:
         self.Work = Work
         self.AWeight = Work
         self.LastAWUpdate = self
+        self.Solid = True
         if Node:
             self.NodeID = Node.NodeID # signature of issuing node
             self.Eligible = False
@@ -69,13 +70,38 @@ class Transaction:
             if not p.Confirmed and p.LastAWUpdate != updateTran:
                 p.updateAW(Node, updateTran, Work)
     
-    def copy(self):
+    def copy(self, Node):
         Tran = copy(self)
-        Tran.Children = []
+        Tran.Solid = True
+        parentIDs = [p.Index for p in Tran.Parents]
+        parents = []
+        for pID in parentIDs:
+            if pID in Node.LedgerTranIDs:
+                parents.append(Node.Ledger[Node.LedgerTranIDs.index(pID)])
+        Tran.Parents = parents
+        childrenIDs = [c.Index for c in Tran.Children]
+        children = []
+        for cID in childrenIDs:
+            if cID in Node.LedgerTranIDs:
+                children.append(Node.Ledger[Node.LedgerTranIDs.index(cID)])
+        Tran.Children = children
         Tran.Eligible = False
         Tran.Confirmed = False
-
         return Tran
+
+    def solidify(self):
+        solidParents = [p for p in self.Parents if p.Solid]
+        if len(solidParents)==1:
+            if self.Parents[0].Index==0: # if parent is genesis
+                self.Solid = True
+        if len(solidParents)==2: # if two solid parents
+            self.Solid = True
+        for c in self.Children:
+            assert isinstance(c, Transaction)
+            if self not in c.Parents:
+                c.Parents.append(self)
+            c.solidify()
+
 
     def is_ready(self):
         for p in self.Parents:
