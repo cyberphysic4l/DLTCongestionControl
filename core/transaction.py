@@ -18,12 +18,13 @@ class Transaction:
         self.Work = Work
         self.AWeight = Work
         self.LastAWUpdate = self
-        self.Solid = True
         if Node:
+            self.Solid = False
             self.NodeID = Node.NodeID # signature of issuing node
             self.Eligible = False
             self.Confirmed = False
         else: # genesis
+            self.Solid = True
             self.NodeID = []
             self.Eligible = True
             self.Confirmed = True
@@ -72,16 +73,18 @@ class Transaction:
     
     def copy(self, Node):
         Tran = copy(self)
-        Tran.Solid = True
+        Tran.Solid = False
         parentIDs = [p.Index for p in Tran.Parents]
         parents = []
         for pID in parentIDs:
+            # if we have the parents in the ledger already, include them as parents
             if pID in Node.LedgerTranIDs:
                 parents.append(Node.Ledger[Node.LedgerTranIDs.index(pID)])
         Tran.Parents = parents
         childrenIDs = [c.Index for c in Tran.Children]
         children = []
         for cID in childrenIDs:
+            # if children are in our ledger already, then include them (needed for solidification)
             if cID in Node.LedgerTranIDs:
                 children.append(Node.Ledger[Node.LedgerTranIDs.index(cID)])
         Tran.Children = children
@@ -96,16 +99,18 @@ class Transaction:
                 self.Solid = True
         if len(solidParents)==2: # if two solid parents
             self.Solid = True
-        for c in self.Children:
-            assert isinstance(c, Transaction)
-            if self not in c.Parents:
-                c.Parents.append(self)
-            c.solidify()
+        if self.Solid:
+            # if we already have some children of this solid transaction, they will possibly need to be solidified too.
+            for c in self.Children:
+                assert isinstance(c, Transaction)
+                if self not in c.Parents:
+                    c.Parents.append(self)
+                c.solidify()
 
 
     def is_ready(self):
         for p in self.Parents:
-            if not p.Eligible:
+            if not p.Eligible and not p.Confirmed:
                 return False
         return True
 

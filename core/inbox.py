@@ -65,7 +65,7 @@ class Inbox:
                 Packet = self.Packets[self.RRNodeID][i]
                 if Packet not in Packets[0]:
                     i += 1
-                    for tranID in Packet.Data.Parents.Index:
+                    for tranID in [p.Index for p in Packet.Data.Parents]:
                         if tranID not in self.RequestedTranIDs and tranID not in self.TranIDs:
                             # send a solidification request for this tran's parents
                             self.Node.Network.send_data(self.Node, Packet.TxNode, tran.SolRequest(tranID), Time)

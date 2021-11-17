@@ -2,7 +2,7 @@ import numpy as np
 
 # Simulation Parameters
 MONTE_CARLOS = 1
-SIM_TIME = 180
+SIM_TIME = 100
 STEP = 0.01
 # Network Parameters
 NU = 10
@@ -34,8 +34,8 @@ MAX_TH = MIN_TH
 QUANTUM = [MAX_WORK*rep/sum(REP) for rep in REP]
 W_Q = 0.1
 P_B = 0.5
-W_MAX = 200
+MAX_BUFFER = 1000
 GRAPH = 'regular'
 
 SCHEDULING = 'drr_lds'
-CONF_WEIGHT = 2
+CONF_WEIGHT = 10

@@ -11,7 +11,7 @@ import sys
 from time import gmtime, strftime
 from core.global_params import *
 from core.network import Network
-from utils import plot_cdf
+from utils import all_node_plot, per_node_barplot, per_node_plot, plot_cdf
 
 
 np.random.seed(0)
@@ -40,6 +40,7 @@ def simulate():
     OldestTxAges = np.zeros((TimeSteps, NUM_NODES))
     OldestTxAge = []
     InboxLens = [np.zeros((TimeSteps, NUM_NODES)) for mc in range(MONTE_CARLOS)]
+    ReadyLens = [np.zeros((TimeSteps, NUM_NODES)) for mc in range(MONTE_CARLOS)]
     InboxLensMA = [np.zeros((TimeSteps, NUM_NODES)) for mc in range(MONTE_CARLOS)]
     Deficits = [np.zeros((TimeSteps, NUM_NODES)) for mc in range(MONTE_CARLOS)]
     Throughput = [np.zeros((TimeSteps, NUM_NODES)) for mc in range(MONTE_CARLOS)]
@@ -47,6 +48,7 @@ def simulate():
     Undissem = [np.zeros((TimeSteps, NUM_NODES)) for mc in range(MONTE_CARLOS)]
     MeanDelay = [np.zeros(SIM_TIME) for mc in range(MONTE_CARLOS)]
     MeanVisDelay = [np.zeros(SIM_TIME) for mc in range(MONTE_CARLOS)]
+    Unsolid = [np.zeros((TimeSteps, NUM_NODES)) for mc in range(MONTE_CARLOS)]
     TP = []
     WTP = []
     latencies = [[] for NodeID in range(NUM_NODES)]
@@ -91,7 +93,9 @@ def simulate():
                     if HonestPackets:
                         OldestPacket = min(HonestPackets, key=lambda x: x.Data.IssueTime)
                         OldestTxAges[i,NodeID] = T - OldestPacket.Data.IssueTime
-                InboxLens[mc][i, NodeID] = len(Net.Nodes[NodeID].Inbox.AllPackets)
+                InboxLens[mc][i,NodeID] = len(Net.Nodes[NodeID].Inbox.AllPackets)
+                ReadyLens[mc][i,NodeID] = len(Net.Nodes[NodeID].Inbox.ReadyPackets)
+                Unsolid[mc][i,NodeID] = len([tran for tran in Net.Nodes[NodeID].Ledger if not tran.Solid])
                 InboxLensMA[mc][i,NodeID] = Net.Nodes[NodeID].Inbox.Avg
                 Deficits[mc][i, NodeID] = Net.Nodes[0].Inbox.Deficit[NodeID]
                 Throughput[mc][i, NodeID] = Net.Throughput[NodeID]
@@ -127,11 +131,13 @@ def simulate():
     avgTP = sum(TP)/len(TP)
     avgWTP = sum(WTP)/len(WTP)
     avgInboxLen = sum(InboxLens)/len(InboxLens)
+    avgReadyLen = sum(ReadyLens)/len(ReadyLens)
     avgInboxLenMA = sum(InboxLensMA)/len(InboxLensMA)
     avgDefs = sum(Deficits)/len(Deficits)
     avgUndissem = sum(Undissem)/len(Undissem)
     avgMeanDelay = sum(MeanDelay)/len(MeanDelay)
     avgMeanVisDelay = sum(MeanVisDelay)/len(MeanVisDelay)
+    avgUnsolid = sum(Unsolid)/len(Unsolid)
     avgOTA = sum(OldestTxAge)/len(OldestTxAge)
     """
     Create a directory for these results and save them
@@ -169,12 +175,14 @@ def simulate():
     np.savetxt(dirstr+'/raw/avgTP.csv', avgTP, delimiter=',')
     np.savetxt(dirstr+'/raw/avgWTP.csv', avgWTP, delimiter=',')
     np.savetxt(dirstr+'/raw/avgInboxLen.csv', avgInboxLen, delimiter=',')
+    np.savetxt(dirstr+'/raw/avgReadyLen.csv', avgReadyLen, delimiter=',')
     np.savetxt(dirstr+'/raw/avgInboxLenMA.csv', avgInboxLenMA, delimiter=',')
     np.savetxt(dirstr+'/raw/avgDefs.csv', avgDefs, delimiter=',')
     np.savetxt(dirstr+'/raw/avgUndissem.csv', avgUndissem, delimiter=',')
     np.savetxt(dirstr+'/raw/avgMeanDelay.csv', avgMeanDelay, delimiter=',')
     np.savetxt(dirstr+'/raw/avgMeanVisDelay.csv', avgMeanVisDelay, delimiter=',')
     np.savetxt(dirstr+'/raw/avgOldestTxAge.csv', avgOTA, delimiter=',')
+    np.savetxt(dirstr+'/raw/avgUnsolid.csv', avgUnsolid, delimiter=',')
     for NodeID in range(NUM_NODES):
         np.savetxt(dirstr+'/raw/inboxLatencies'+str(NodeID)+'.csv',
                    np.asarray(inboxLatencies[NodeID]), delimiter=',')
@@ -202,6 +210,8 @@ def plot_results(dirstr):
     #avgTP = np.loadtxt(dirstr+'/avgTP.csv', delimiter=',')
     avgTP = np.loadtxt(dirstr+'/raw/avgWTP.csv', delimiter=',')
     avgInboxLen = np.loadtxt(dirstr+'/raw/avgInboxLen.csv', delimiter=',')
+    avgReadyLen = np.loadtxt(dirstr+'/raw/avgReadyLen.csv', delimiter=',')
+    avgUnsolid = np.loadtxt(dirstr+'/raw/avgUnsolid.csv', delimiter=',')
     avgInboxLenMA = np.loadtxt(dirstr+'/raw/avgInboxLenMA.csv', delimiter=',')
     avgUndissem = np.loadtxt(dirstr+'/raw/avgUndissem.csv', delimiter=',')
     avgMeanDelay = np.loadtxt(dirstr+'/raw/avgMeanDelay.csv', delimiter=',')
@@ -283,49 +293,17 @@ def plot_results(dirstr):
     fig2.tight_layout()
     plt.savefig(dirstr+'/plots/Throughput.png', bbox_inches='tight')
     
-    fig3, ax3 = plt.subplots(figsize=(8,4))
-    ax3.grid(linestyle='--')
-    ax3.set_xlabel('Latency (sec)')
-    plot_cdf(latencies, ax3)
-    plt.savefig(dirstr+'/plots/Latency.png', bbox_inches='tight')
-    '''
-    fig3a, ax3a = plt.subplots(figsize=(8,4))
-    ax3a.grid(linestyle='--')
-    ax3a.set_xlabel('Inbox Latency (sec)')
-    plot_cdf(inboxLatencies, ax3a)
-    plt.savefig(dirstr+'/InboxLatency.png', bbox_inches='tight')
-    '''
-    fig4, ax4 = plt.subplots(figsize=(8,4))
-    ax4.grid(linestyle='--')
-    ax4.set_xlabel('Time (sec)')
-    ax4.set_ylabel(r'$\lambda_i$')
-    ax4.plot(np.arange(0, SIM_TIME, STEP), np.sum(avgLmds, axis=1), color='tab:blue')
-    '''
-    for NodeID in range(NUM_NODES):
-        if MODE[NodeID]==1:
-            ax4.plot(np.arange(0, SIM_TIME, STEP), avgLmds[:,NodeID], linewidth=5*REP[NodeID]/REP[0], color='tab:blue')
-        if MODE[NodeID]==2:
-            ax4.plot(np.arange(0, SIM_TIME, STEP), avgLmds[:,NodeID], linewidth=5*REP[NodeID]/REP[0], color='tab:red')
-        if MODE[NodeID]==3:
-            ax4.plot(np.arange(0, SIM_TIME, STEP), avgLmds[:,NodeID], linewidth=5*REP[NodeID]/REP[0], color='tab:green')
-    '''
-    plt.savefig(dirstr+'/plots/IssueRates.png', bbox_inches='tight')
-    
-    fig5, ax5 = plt.subplots(figsize=(8,4))
-    ax5.grid(linestyle='--')
-    ax5.set_xlabel('Time (sec)')
-    ax5.set_ylabel('Inbox length')
-    N=2000
 
-    for NodeID in range(NUM_NODES):
-        if MODE[NodeID]==1:
-            ax5.plot(np.arange((N-1)*STEP, SIM_TIME, STEP), np.convolve(np.ones(N)/N, avgInboxLen[:,NodeID], 'valid'), color='tab:blue')
-        if MODE[NodeID]==2:
-            ax5.plot(np.arange((N-1)*STEP, SIM_TIME, STEP), np.convolve(np.ones(N)/N, avgInboxLen[:,NodeID], 'valid'), color='tab:red')
-    #ax5.plot(np.arange((N-1)*STEP, SIM_TIME, STEP), np.convolve(np.ones(N)/N, avgInboxLen[:,1], 'valid'), color='black')
-    ax5.set_xlim(0, SIM_TIME)
+    plot_cdf(latencies, 'Latency (sec)', dirstr+'/plots/Latency.png')
     
-    plt.savefig(dirstr+'/plots/AvgInboxLen.png', bbox_inches='tight')
+    #ax4.plot(np.arange(0, SIM_TIME, STEP), np.sum(avgLmds, axis=1), color='tab:blue')
+
+    per_node_plot(avgLmds, 'Time (sec)', r'$\lambda_i$', '', dirstr+'/plots/IssueRates.png', avg_window=1, modes=[1,2])
+    
+    per_node_plot(avgInboxLen, 'Time (sec)', 'Inbox length', '', dirstr+'/plots/AvgInboxLen.png')
+    per_node_plot(avgReadyLen, 'Time (sec)', 'Ready length', '', dirstr+'/plots/AvgReadyLen.png')
+
+    per_node_plot(avgUnsolid, 'Time (sec)', 'Unsolid', '', dirstr+'/plots/AvgUnsolid.png')
     
     fig5a, ax5a = plt.subplots(figsize=(8,4))
     ax5a.grid(linestyle='--')
@@ -359,44 +337,9 @@ def plot_results(dirstr):
     
     plt.savefig(dirstr+'/plots/InboxLenMA.png', bbox_inches='tight')
     
-    fig6, ax6 = plt.subplots(figsize=(8,4))
-    ax6.grid(linestyle='--')
-    ax6.set_xlabel('Node ID')
-    ax6.title.set_text('Reputation Distribution')
-    ax6.set_ylabel('Reputation')
-    for NodeID in range(NUM_NODES):
-        if MODE[NodeID]==0:
-            ax6.bar(NodeID, REP[NodeID], color='gray')
-        if MODE[NodeID]==1:
-            ax6.bar(NodeID, REP[NodeID], color='tab:blue')
-        if MODE[NodeID]==2:
-            ax6.bar(NodeID, REP[NodeID], color='tab:red')
-        if MODE[NodeID]==3:
-            ax6.bar(NodeID, REP[NodeID], color='tab:green')
-    ModeLines = [Line2D([0],[0],color='tab:red', lw=4), Line2D([0],[0],color='tab:blue', lw=4), Line2D([0],[0],color='gray', lw=4), Line2D([0],[0],color='tab:green', lw=4)]
-    ax6.legend(ModeLines, ['Best-effort', 'Content', 'Inactive', 'Malicious'], loc='upper right')
-    plt.savefig(dirstr+'/plots/RepDist.png', bbox_inches='tight')
-    '''
-    fig7, ax7 = plt.subplots(figsize=(8,4))
-    plot_cdf(ISTimes, ax7)
-    ax7.grid(linestyle='--')
-    ax7.set_xlabel('Inter-service time (sec)')
-    plt.savefig(dirstr+'/InterServiceTimes.png', bbox_inches='tight')
-    '''
-    fig8, ax8 = plt.subplots(figsize=(8,4))
-    #plot_cdf_exp(IATimes, ax8)
-    ax8.grid(linestyle='--')
-    ax8.set_xlabel('Inter-arrival time (sec)')
-    plt.savefig(dirstr+'/plots/InterArrivalTimes.png', bbox_inches='tight')
-    
-    fig9, ax9 = plt.subplots(figsize=(8,4))
-    ax9.grid(linestyle='--')
-    ax9.plot(np.arange(0, SIM_TIME, STEP), avgOTA, color='black')
-    ax9.set_ylabel('Max time in transit (sec)')
-    ax9.set_xlabel('Time (sec)')
-    plt.savefig(dirstr+'/plots/MaxAge.png', bbox_inches='tight')
+    per_node_barplot('Node ID', 'Reputation', 'Reputation Distribution', dirstr+'/plots/RepDist.png')
 
-
+    all_node_plot(avgOTA, 'Time (sec)', 'Max time in transit (sec)', '', dirstr+'/plots/MaxAge.png')
 
 if __name__ == "__main__":
         main()

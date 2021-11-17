@@ -232,8 +232,7 @@ class Node:
                 '''
                 Buffer Management - Drop head queue
                 '''                
-                if sum(self.Inbox.Work)>W_MAX:
+                if sum(self.Inbox.Work)>MAX_BUFFER:
                     ScaledWork = np.array([self.Inbox.Work[NodeID]/REP[NodeID] for NodeID in range(NUM_NODES)])
                     MalNodeID = np.argmax(ScaledWork)
                     self.Inbox.remove_packet(self.Inbox.Packets[MalNodeID][0])
-                
