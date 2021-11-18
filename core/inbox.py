@@ -21,6 +21,16 @@ class Inbox:
         self.DroppedTranIDs = []
         self.DropTimes = []
 
+    def update_ready(self, Tran: tran.Transaction):
+        if Tran.Index in self.TranIDs:
+            packetList = [p for p in self.AllPackets if p.Data.Index==Tran.Index]
+            assert len(packetList)==1
+            Packet = packetList[0]
+        else:
+            return
+        if Packet not in self.ReadyPackets and Tran.is_ready():
+            self.ReadyPackets.append(Packet)
+    
     def add_packet(self, Packet):
         Tran = Packet.Data
         assert isinstance(Tran, tran.Transaction)

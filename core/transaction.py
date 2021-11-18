@@ -40,6 +40,7 @@ class Transaction:
         # add this to tipset if no eligible children
         isTip = True
         for c in self.Children:
+            Node.Inbox.update_ready(c)
             if c.Eligible:
                 isTip = False
                 break
@@ -109,10 +110,13 @@ class Transaction:
 
 
     def is_ready(self):
-        for p in self.Parents:
-            if not p.Eligible and not p.Confirmed:
-                return False
-        return True
+        eligConfParents = [p for p in self.Parents if p.Eligible or p.Confirmed]
+        if len(eligConfParents)==1:
+            if self.Parents[0].Index==0: # if one parent eligible/confirmed
+                return True
+        if len(eligConfParents)==2: # if two parents eligible/confirmed
+            return True
+        return False
 
 class SolRequest:
     '''
