@@ -3,7 +3,7 @@ from .inbox import Inbox
 from .transaction import Transaction
 from . import network as net
 import numpy as np
-from random import sample
+from random import choices
 
 class Node:
     """
@@ -83,9 +83,10 @@ class Node:
         Implements uniform random tip selection
         """
         if len(self.TipsSet)>1:
-            Selection = sample(self.TipsSet, 2)
+            Selection = choices(self.TipsSet, k=2)
         else:
-            Selection = self.Ledger[-2:-1]
+            eligibleLedger = [tran for tran in self.Ledger if tran.Eligible and tran.Solid]
+            Selection = choices(eligibleLedger)
         return Selection
     
     def schedule_txs(self, Time):
@@ -127,8 +128,9 @@ class Node:
     
     def schedule(self, TxNode, Tran: Transaction, Time):
         # add to eligible set
+        assert not Tran.Eligible
         Tran.mark_eligible(self)
-
+        Tran.EligibleTime = Time
         # broadcast the packet
         self.Network.broadcast_data(self, TxNode, Tran, Time)
 
@@ -146,6 +148,8 @@ class Node:
         Packet.Data = Packet.Data.copy(self)
         Tran = Packet.Data
         assert isinstance(Tran, Transaction)
+        if len(set(self.LedgerTranIDs))!=len(self.LedgerTranIDs):
+            print("duplicates in ledger")
         Tran.solidify()
                 
         self.book(Packet, Time)

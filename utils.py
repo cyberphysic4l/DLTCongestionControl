@@ -199,7 +199,7 @@ def per_node_barplot(xlabel: str, ylabel: str, title: str, dirstr: str, legend_l
     ax.legend(ModeLines, ['Best-effort', 'Content', 'Inactive', 'Malicious'], loc=legend_loc)
     plt.savefig(dirstr, bbox_inches='tight')
 
-def per_node_plot(data: np.ndarray, xlabel: str, ylabel: str, title: str, dirstr: str, avg_window: int = 2000, legend_loc: str = 'upper right', modes = None):
+def per_node_plot(data: np.ndarray, xlabel: str, ylabel: str, title: str, dirstr: str, avg_window: int = 2000, legend_loc: str = 'upper right', modes = None, step=STEP):
     fig, ax = plt.subplots(figsize=(8,4))
     ax.grid(linestyle='--')
     ax.set_xlabel(xlabel)
@@ -212,7 +212,7 @@ def per_node_plot(data: np.ndarray, xlabel: str, ylabel: str, title: str, dirstr
     colors = ['tab:gray', 'tab:blue', 'tab:red', 'tab:green']
     for NodeID in range(NUM_NODES):
         if MODE[NodeID] in modes and np.any(data[:, NodeID]):
-            ax.plot(np.arange((avg_window-1)*STEP, SIM_TIME, STEP), np.convolve(np.ones(avg_window)/avg_window, data[:,NodeID], 'valid'), color=colors[MODE[NodeID]])
+            ax.plot(np.arange((avg_window-1)*step, SIM_TIME, step), np.convolve(np.ones(avg_window)/avg_window, data[:,NodeID], 'valid'), color=colors[MODE[NodeID]])
     
     ax.set_xlim(0, SIM_TIME)
     ModeLines = [Line2D([0],[0],color=colors[mode], lw=4) for mode in modes]

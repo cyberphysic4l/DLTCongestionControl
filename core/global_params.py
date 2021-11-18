@@ -2,11 +2,11 @@ import numpy as np
 
 # Simulation Parameters
 MONTE_CARLOS = 1
-SIM_TIME = 100
+SIM_TIME = 180
 STEP = 0.01
 # Network Parameters
 NU = 10
-NUM_NODES = 10
+NUM_NODES = 20
 NUM_NEIGHBOURS = 4
 START_TIMES = 10*np.ones(NUM_NODES)
 REPDIST = 'zipf'
@@ -38,4 +38,4 @@ MAX_BUFFER = 1000
 GRAPH = 'regular'
 
 SCHEDULING = 'drr_lds'
-CONF_WEIGHT = 10
+CONF_WEIGHT = 100

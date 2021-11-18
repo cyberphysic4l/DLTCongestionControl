@@ -23,16 +23,19 @@ class Transaction:
             self.NodeID = Node.NodeID # signature of issuing node
             self.Eligible = False
             self.Confirmed = False
+            self.EligibleTime = None
         else: # genesis
             self.Solid = True
             self.NodeID = []
             self.Eligible = True
             self.Confirmed = True
+            self.EligibleTime = 0
 
     def mark_confirmed(self, Node):
         self.Confirmed = True
         self.Network.ConfirmedNodes[self.Index] +=1
-        self.mark_eligible(Node)
+        if not self.Eligible:
+            self.mark_eligible(Node)
 
     def mark_eligible(self, Node):
         # mark this transaction as eligible and modify the tipset accordingly
@@ -48,13 +51,11 @@ class Transaction:
             Node.TipsSet.append(self)
         
         # remove parents from tip set
-        if self.Parents:
-            for p in self.Parents:
-                p.Children.append(self)
-                if p in Node.TipsSet:
-                    Node.TipsSet.remove(p)
-                else:
-                    continue
+        for p in self.Parents:
+            if p in Node.TipsSet:
+                Node.TipsSet.remove(p)
+            else:
+                continue
     
     def updateAW(self, Node, updateTran=None, Work=None):
         if updateTran is None:
@@ -90,10 +91,13 @@ class Transaction:
                 children.append(Node.Ledger[Node.LedgerTranIDs.index(cID)])
         Tran.Children = children
         Tran.Eligible = False
+        Tran.EligibleTime = None
         Tran.Confirmed = False
         return Tran
 
     def solidify(self):
+        if len(self.Parents)>2:
+            print("more than 2 parents...")
         solidParents = [p for p in self.Parents if p.Solid]
         if len(solidParents)==1:
             if self.Parents[0].Index==0: # if parent is genesis

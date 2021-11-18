@@ -75,12 +75,14 @@ class Inbox:
                 Packet = self.Packets[self.RRNodeID][i]
                 if Packet not in Packets[0]:
                     i += 1
-                    for tranID in [p.Index for p in Packet.Data.Parents]:
-                        if tranID not in self.RequestedTranIDs and tranID not in self.TranIDs:
+                    '''
+                    for trans in [p for p in Packet.Data.Parents]:
+                        if trans.Index not in self.RequestedTranIDs and trans.Index not in self.TranIDs and not (trans.Eligible or trans.Confirmed):
                             # send a solidification request for this tran's parents
-                            self.Node.Network.send_data(self.Node, Packet.TxNode, tran.SolRequest(tranID), Time)
-                            self.RequestedTranIDs.append(tranID)
+                            self.Node.Network.send_data(self.Node, Packet.TxNode, tran.SolRequest(trans.Index), Time)
+                            self.RequestedTranIDs.append(trans.Index)
                     continue
+                '''
                 Work = Packet.Data.Work
                 if self.Deficit[self.RRNodeID]>=Work and Packet.EndTime<=Time:
                     self.Deficit[self.RRNodeID] -= Work
