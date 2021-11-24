@@ -75,7 +75,6 @@ class Transaction:
     
     def copy(self, Node):
         Tran = copy(self)
-        Tran.Solid = False
         parentIDs = [p.Index for p in Tran.Parents]
         parents = []
         for pID in parentIDs:
@@ -90,25 +89,34 @@ class Transaction:
             if cID in Node.LedgerTranIDs:
                 children.append(Node.Ledger[Node.LedgerTranIDs.index(cID)])
         Tran.Children = children
-        Tran.Eligible = False
-        Tran.EligibleTime = None
-        Tran.Confirmed = False
+        if self.Index == 0:
+            Tran.Eligible = True
+            Tran.EligibleTime = 0
+            Tran.Confirmed = True
+            Tran.Solid = True
+        else:
+            Tran.Eligible = False
+            Tran.EligibleTime = None
+            Tran.Confirmed = False
+            Tran.Solid = False
         return Tran
 
-    def solidify(self):
+    def solidify(self, Node = None):
         if len(self.Parents)>2:
             print("more than 2 parents...")
         solidParents = [p for p in self.Parents if p.Solid]
         if len(solidParents)==1:
             if self.Parents[0].Index==0: # if parent is genesis
                 self.Solid = True
-        if len(solidParents)==2: # if two solid parents
+        if len(solidParents)>=2: # if two solid parents
             self.Solid = True
         if self.Solid:
             # if we already have some children of this solid transaction, they will possibly need to be solidified too.
             for c in self.Children:
                 assert isinstance(c, Transaction)
                 if self not in c.Parents:
+                    if len(c.Parents)==2:
+                        print("3rd parent being added...")
                     c.Parents.append(self)
                 c.solidify()
 

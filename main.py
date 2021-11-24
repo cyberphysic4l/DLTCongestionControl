@@ -311,7 +311,7 @@ def plot_results(dirstr):
     plt.savefig(dirstr+'/plots/Throughput.png', bbox_inches='tight')
     
 
-    plot_cdf(latencies, 'Latency (sec)', dirstr+'/plots/Latency.png')
+    #plot_cdf(latencies, 'Latency (sec)', dirstr+'/plots/Latency.png')
     
     #ax4.plot(np.arange(0, SIM_TIME, STEP), np.sum(avgLmds, axis=1), color='tab:blue')
 
@@ -322,7 +322,7 @@ def plot_results(dirstr):
     per_node_plot(avgNumTips, 'Time (sec)', 'Number of Tips', '', dirstr+'/plots/AvgNumTips.png')
     per_node_plot(avgEligibleDelays, 'Time (sec)', 'Eligible Delays', '', dirstr+'/plots/AvgEligibleDelays.png', avg_window=20, step=1)
     per_node_plot(avgUnsolid, 'Time (sec)', 'Unsolid', '', dirstr+'/plots/AvgUnsolid.png')
-    
+    """
     fig5a, ax5a = plt.subplots(figsize=(8,4))
     ax5a.grid(linestyle='--')
     ax5a.set_xlabel('Time (sec)')
@@ -354,6 +354,7 @@ def plot_results(dirstr):
     ax5b.plot(bins, inboxLen, color='blue')
     
     plt.savefig(dirstr+'/plots/InboxLenMA.png', bbox_inches='tight')
+    """
     
     per_node_barplot('Node ID', 'Reputation', 'Reputation Distribution', dirstr+'/plots/RepDist.png')
 

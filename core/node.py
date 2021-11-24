@@ -3,15 +3,15 @@ from .inbox import Inbox
 from .transaction import Transaction
 from . import network as net
 import numpy as np
-from random import choices
+from random import sample
 
 class Node:
     """
     Object to simulate an IOTA full node
     """
     def __init__(self, Network, NodeID, Genesis, PoWDelay = 1):
-        self.TipsSet = [Genesis]
-        self.Ledger = [Genesis]
+        self.TipsSet = [Genesis.copy(self)]
+        self.Ledger = [Genesis.copy(self)]
         self.LedgerTranIDs = [0]
         self.Neighbours = []
         self.Network = Network
@@ -83,10 +83,15 @@ class Node:
         Implements uniform random tip selection
         """
         if len(self.TipsSet)>1:
-            Selection = choices(self.TipsSet, k=2)
+            ts = self.TipsSet
+            Selection = sample(ts, k=2)
         else:
             eligibleLedger = [tran for tran in self.Ledger if tran.Eligible and tran.Solid]
-            Selection = choices(eligibleLedger)
+            if len(eligibleLedger)>1:
+                Selection = sample(eligibleLedger, k=2)
+            else:
+                Selection = eligibleLedger # genesis
+        assert len(Selection)==1 or len(Selection)==2
         return Selection
     
     def schedule_txs(self, Time):
@@ -148,9 +153,11 @@ class Node:
         Packet.Data = Packet.Data.copy(self)
         Tran = Packet.Data
         assert isinstance(Tran, Transaction)
-        if len(set(self.LedgerTranIDs))!=len(self.LedgerTranIDs):
+        if len(set(self.Ledger))!=len(set(self.LedgerTranIDs)):
             print("duplicates in ledger")
-        Tran.solidify()
+        if Tran.Index in self.LedgerTranIDs: # return if this tranaction is already booked
+            return
+        Tran.solidify(self)
                 
         self.book(Packet, Time)
 
@@ -161,8 +168,6 @@ class Node:
         # make a shallow copy of the transaction and initialise metadata
         Tran = Packet.Data
         assert isinstance(Tran, Transaction)
-        if Tran.Index in self.LedgerTranIDs: # return if this tranaction is already booked
-            return
         self.Ledger.append(Tran)
         self.LedgerTranIDs.append(Tran.Index)
         for p in Tran.Parents:
