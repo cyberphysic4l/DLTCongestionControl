@@ -69,10 +69,10 @@ class Network:
             Node.schedule_txs(Time)
     
     def tran_latency(self, latencies, latTimes):
-        for Tran in self.Nodes[0].Ledger:
-            if Tran.Index in self.DissemTimes and Tran.IssueTime>20:
-                latencies[Tran.NodeID].append(self.DissemTimes[Tran.Index]-Tran.IssueTime)
-                latTimes[Tran.NodeID].append(self.DissemTimes[Tran.Index])
+        for i,Tran in self.Nodes[0].Ledger.items():
+            if i in self.DissemTimes and Tran.IssueTime>20:
+                latencies[Tran.NodeID].append(self.DissemTimes[i]-Tran.IssueTime)
+                latTimes[Tran.NodeID].append(self.DissemTimes[i])
         return latencies, latTimes
 
 class CommChannel:
@@ -119,7 +119,7 @@ class CommChannel:
         elif isinstance(Packet.Data, tran.SolRequest):
             # else if this is a solidification request, retrieve the transaction and send it back
             TranID = Packet.Data.TranID
-            Tran = self.RxNode.Ledger[self.RxNode.LedgerTranIDs.index(TranID)]
+            Tran = self.RxNode.Ledger[TranID]
             self.RxNode.Network.send_data(self.RxNode, self.TxNode, Tran, Time)
         else:
             # else this is a back off notification

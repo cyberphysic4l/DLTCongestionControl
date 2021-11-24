@@ -10,9 +10,9 @@ class Node:
     Object to simulate an IOTA full node
     """
     def __init__(self, Network, NodeID, Genesis, PoWDelay = 1):
-        self.TipsSet = [Genesis.copy(self)]
-        self.Ledger = [Genesis.copy(self)]
-        self.LedgerTranIDs = [0]
+        g = Genesis.copy(self)
+        self.TipsSet = [g]
+        self.Ledger = {0: g}
         self.Neighbours = []
         self.Network = Network
         self.Inbox = Inbox(self)
@@ -32,6 +32,7 @@ class Node:
         self.ArrivalTimes = []
         self.ArrivalWorks = []
         self.InboxLatencies = []
+        self.DroppedPackets = []
         
     def issue_txs(self, Time):
         """
@@ -74,7 +75,7 @@ class Node:
             Tran = self.IssuedTrans.pop(0)
             p = net.Packet(self, self, Tran, Tran.IssueTime)
             p.EndTime = Tran.IssueTime
-            self.book(p, Tran.IssueTime)
+            self.solidify(p, Tran.IssueTime) # solidify then book this transaction
             if MODE[self.NodeID]==3: # malicious don't consider own txs for scheduling
                 self.schedule(self, Tran, Tran.IssueTime)
     
@@ -86,12 +87,13 @@ class Node:
             ts = self.TipsSet
             Selection = sample(ts, k=2)
         else:
-            eligibleLedger = [tran for tran in self.Ledger if tran.Eligible and tran.Solid]
+            eligibleLedger = [tran for _,tran in self.Ledger.items() if tran.Eligible] 
             if len(eligibleLedger)>1:
                 Selection = sample(eligibleLedger, k=2)
             else:
                 Selection = eligibleLedger # genesis
-        assert len(Selection)==1 or len(Selection)==2
+        if not (len(Selection)==1 or len(Selection)==2):
+            print(eligibleLedger)
         return Selection
     
     def schedule_txs(self, Time):
@@ -144,20 +146,20 @@ class Node:
         Not fully implemented yet
         Simply makes a copy of the transaction and then calls the solidifier
         """
+        if Packet.Data.Index in self.Ledger: # return if this tranaction is already booked
+            return
+        Packet.Data = Packet.Data.copy(self)
+        Tran = Packet.Data
+        assert isinstance(Tran, Transaction)
         self.solidify(Packet, Time)
 
     def solidify(self, Packet, Time):
         """
         Not implemented yet, just calls the booker
-        """
-        Packet.Data = Packet.Data.copy(self)
+
         Tran = Packet.Data
-        assert isinstance(Tran, Transaction)
-        if len(set(self.Ledger))!=len(set(self.LedgerTranIDs)):
-            print("duplicates in ledger")
-        if Tran.Index in self.LedgerTranIDs: # return if this tranaction is already booked
-            return
         Tran.solidify(self)
+        """
                 
         self.book(Packet, Time)
 
@@ -168,8 +170,8 @@ class Node:
         # make a shallow copy of the transaction and initialise metadata
         Tran = Packet.Data
         assert isinstance(Tran, Transaction)
-        self.Ledger.append(Tran)
-        self.LedgerTranIDs.append(Tran.Index)
+        assert Tran.Index not in self.Ledger
+        self.Ledger[Tran.Index] = Tran
         for p in Tran.Parents:
             p.Children.append(Tran)
         Tran.updateAW(self)
@@ -244,4 +246,6 @@ class Node:
                 if sum(self.Inbox.Work)>MAX_BUFFER:
                     ScaledWork = np.array([self.Inbox.Work[NodeID]/REP[NodeID] for NodeID in range(NUM_NODES)])
                     MalNodeID = np.argmax(ScaledWork)
-                    self.Inbox.remove_packet(self.Inbox.Packets[MalNodeID][0])
+                    packet = self.Inbox.Packets[MalNodeID][0]
+                    self.Inbox.remove_packet(packet)
+                    self.DroppedPackets.append(packet)

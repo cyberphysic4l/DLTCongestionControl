@@ -34,8 +34,6 @@ class Transaction:
     def mark_confirmed(self, Node):
         self.Confirmed = True
         self.Network.ConfirmedNodes[self.Index] +=1
-        if not self.Eligible:
-            self.mark_eligible(Node)
 
     def mark_eligible(self, Node):
         # mark this transaction as eligible and modify the tipset accordingly
@@ -79,15 +77,15 @@ class Transaction:
         parents = []
         for pID in parentIDs:
             # if we have the parents in the ledger already, include them as parents
-            if pID in Node.LedgerTranIDs:
-                parents.append(Node.Ledger[Node.LedgerTranIDs.index(pID)])
+            if pID in Node.Ledger:
+                parents.append(Node.Ledger[pID])
         Tran.Parents = parents
         childrenIDs = [c.Index for c in Tran.Children]
         children = []
         for cID in childrenIDs:
             # if children are in our ledger already, then include them (needed for solidification)
-            if cID in Node.LedgerTranIDs:
-                children.append(Node.Ledger[Node.LedgerTranIDs.index(cID)])
+            if cID in Node.Ledger:
+                children.append(Node.Ledger[cID])
         Tran.Children = children
         if self.Index == 0:
             Tran.Eligible = True
@@ -108,7 +106,7 @@ class Transaction:
         if len(solidParents)==1:
             if self.Parents[0].Index==0: # if parent is genesis
                 self.Solid = True
-        if len(solidParents)>=2: # if two solid parents
+        if len(solidParents)==2: # if two solid parents
             self.Solid = True
         if self.Solid:
             # if we already have some children of this solid transaction, they will possibly need to be solidified too.

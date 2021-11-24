@@ -18,8 +18,6 @@ class Inbox:
         self.Scheduled = []
         self.Avg = 0
         self.RequestedTranIDs = []
-        self.DroppedTranIDs = []
-        self.DropTimes = []
 
     def update_ready(self, Tran: tran.Transaction):
         if Tran.Index in self.TranIDs:
@@ -30,6 +28,8 @@ class Inbox:
             return
         if Packet not in self.ReadyPackets and Tran.is_ready():
             self.ReadyPackets.append(Packet)
+        if len(self.AllPackets) - len(self.ReadyPackets) >30:
+            print("30 not ready packets")
     
     def add_packet(self, Packet):
         Tran = Packet.Data

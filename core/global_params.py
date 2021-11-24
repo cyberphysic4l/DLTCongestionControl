@@ -38,4 +38,4 @@ MAX_BUFFER = 1000
 GRAPH = 'regular'
 
 SCHEDULING = 'drr_lds'
-CONF_WEIGHT = 100
+CONF_WEIGHT = 10

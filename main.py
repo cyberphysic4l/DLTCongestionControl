@@ -23,8 +23,6 @@ def main():
     dirstr = simulate()
     plot_results(dirstr)
     
-    sys.stdout.write('\a')
-    
 def simulate():
     """
     Setup simulation inputs and instantiate output arrays
@@ -41,6 +39,7 @@ def simulate():
     OldestTxAge = []
     InboxLens = [np.zeros((TimeSteps, NUM_NODES)) for mc in range(MONTE_CARLOS)]
     ReadyLens = [np.zeros((TimeSteps, NUM_NODES)) for mc in range(MONTE_CARLOS)]
+    Dropped = [np.zeros((TimeSteps, NUM_NODES)) for mc in range(MONTE_CARLOS)]
     NumTips = [np.zeros((TimeSteps, NUM_NODES)) for mc in range(MONTE_CARLOS)]
     InboxLensMA = [np.zeros((TimeSteps, NUM_NODES)) for mc in range(MONTE_CARLOS)]
     Deficits = [np.zeros((TimeSteps, NUM_NODES)) for mc in range(MONTE_CARLOS)]
@@ -97,8 +96,10 @@ def simulate():
                         OldestTxAges[i,NodeID] = T - OldestPacket.Data.IssueTime
                 InboxLens[mc][i,NodeID] = len(Net.Nodes[NodeID].Inbox.AllPackets)
                 ReadyLens[mc][i,NodeID] = len(Net.Nodes[NodeID].Inbox.ReadyPackets)
+                Dropped[mc][i,NodeID] = len(Net.Nodes[NodeID].DroppedPackets)
                 NumTips[mc][i,NodeID] = len(Net.Nodes[NodeID].TipsSet)
-                Unsolid[mc][i,NodeID] = len([tran for tran in Net.Nodes[NodeID].Ledger if not tran.Solid])
+                #This measurement takes ages so left out unless needed.
+                #Unsolid[mc][i,NodeID] = len([tran for _,tran in Net.Nodes[NodeID].Ledger.items() if not tran.Solid])
                 InboxLensMA[mc][i,NodeID] = Net.Nodes[NodeID].Inbox.Avg
                 Deficits[mc][i, NodeID] = Net.Nodes[0].Inbox.Deficit[NodeID]
                 Throughput[mc][i, NodeID] = Net.Throughput[NodeID]
@@ -116,7 +117,7 @@ def simulate():
         for NodeID in range(NUM_NODES):
             for i in range(SIM_TIME):
                 delays = []
-                for tran in Net.Nodes[NodeID].Ledger:
+                for _,tran in Net.Nodes[NodeID].Ledger.items():
                     if tran.EligibleTime is not None:
                         if int(tran.EligibleTime)==i:
                             delays.append(tran.EligibleTime-tran.IssueTime)
@@ -143,6 +144,7 @@ def simulate():
     avgWTP = sum(WTP)/len(WTP)
     avgInboxLen = sum(InboxLens)/len(InboxLens)
     avgReadyLen = sum(ReadyLens)/len(ReadyLens)
+    avgDropped = sum(Dropped)/len(Dropped)
     avgNumTips = sum(NumTips)/len(NumTips)
     avgInboxLenMA = sum(InboxLensMA)/len(InboxLensMA)
     avgDefs = sum(Deficits)/len(Deficits)
@@ -189,6 +191,7 @@ def simulate():
     np.savetxt(dirstr+'/raw/avgWTP.csv', avgWTP, delimiter=',')
     np.savetxt(dirstr+'/raw/avgInboxLen.csv', avgInboxLen, delimiter=',')
     np.savetxt(dirstr+'/raw/avgReadyLen.csv', avgReadyLen, delimiter=',')
+    np.savetxt(dirstr+'/raw/avgDropped.csv', avgDropped, delimiter=',')
     np.savetxt(dirstr+'/raw/avgNumTips.csv', avgNumTips, delimiter=',')
     np.savetxt(dirstr+'/raw/avgInboxLenMA.csv', avgInboxLenMA, delimiter=',')
     np.savetxt(dirstr+'/raw/avgDefs.csv', avgDefs, delimiter=',')
@@ -226,6 +229,7 @@ def plot_results(dirstr):
     avgTP = np.loadtxt(dirstr+'/raw/avgWTP.csv', delimiter=',')
     avgInboxLen = np.loadtxt(dirstr+'/raw/avgInboxLen.csv', delimiter=',')
     avgReadyLen = np.loadtxt(dirstr+'/raw/avgReadyLen.csv', delimiter=',')
+    avgDropped = np.loadtxt(dirstr+'/raw/avgDropped.csv', delimiter=',')
     avgNumTips = np.loadtxt(dirstr+'/raw/avgNumTips.csv', delimiter=',')
     avgUnsolid = np.loadtxt(dirstr+'/raw/avgUnsolid.csv', delimiter=',')
     avgEligibleDelays = np.loadtxt(dirstr+'/raw/avgEligibleDelays.csv', delimiter=',')
@@ -311,7 +315,7 @@ def plot_results(dirstr):
     plt.savefig(dirstr+'/plots/Throughput.png', bbox_inches='tight')
     
 
-    #plot_cdf(latencies, 'Latency (sec)', dirstr+'/plots/Latency.png')
+    plot_cdf(latencies, 'Latency (sec)', dirstr+'/plots/Latency.png')
     
     #ax4.plot(np.arange(0, SIM_TIME, STEP), np.sum(avgLmds, axis=1), color='tab:blue')
 
@@ -319,6 +323,9 @@ def plot_results(dirstr):
     
     per_node_plot(avgInboxLen, 'Time (sec)', 'Inbox length', '', dirstr+'/plots/AvgInboxLen.png')
     per_node_plot(avgReadyLen, 'Time (sec)', 'Ready length', '', dirstr+'/plots/AvgReadyLen.png')
+    per_node_plot(avgDropped, 'Time (sec)', 'Dropped Transactions', '', dirstr+'/plots/AvgDropped.png')
+    per_node_plot(avgInboxLen-avgReadyLen, 'Time (sec)', 'Not Ready length', '', dirstr+'/plots/AvgNonReadyLen.png')
+
     per_node_plot(avgNumTips, 'Time (sec)', 'Number of Tips', '', dirstr+'/plots/AvgNumTips.png')
     per_node_plot(avgEligibleDelays, 'Time (sec)', 'Eligible Delays', '', dirstr+'/plots/AvgEligibleDelays.png', avg_window=20, step=1)
     per_node_plot(avgUnsolid, 'Time (sec)', 'Unsolid', '', dirstr+'/plots/AvgUnsolid.png')
