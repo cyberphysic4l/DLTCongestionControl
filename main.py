@@ -11,8 +11,92 @@ import sys
 from time import gmtime, strftime
 from core.global_params import *
 from core.network import Network
-from utils import all_node_plot, per_node_barplot, per_node_plot, plot_cdf
+from utils import all_node_plot, per_node_barplot, per_node_plot, per_node_plotly_plot, plot_cdf
+import plotly.express as px
+import plotly.graph_objects as go
+import dash
+import dash_core_components as dcc
+import dash_html_components as html
+from dash.dependencies import Input, Output, State
+import pandas as pd
 
+TimeSteps = int(SIM_TIME/STEP)
+n_steps = UPDATE_INTERVAL*int(1/STEP)
+InboxLens = np.zeros((int(SIM_TIME/STEP), NUM_NODES))
+TipsSet = np.zeros((int(SIM_TIME/STEP), NUM_NODES))
+Throughput = np.zeros((int((SIM_TIME+UPDATE_INTERVAL)/STEP), NUM_NODES))
+DissemRate = np.zeros((int(SIM_TIME/STEP), NUM_NODES))
+fig = per_node_plotly_plot(0, InboxLens, 'Time', 'Inbox Length', 'Inbox Length Plot', avg_window=100)
+if GRAPH=='regular':
+    G = nx.random_regular_graph(NUM_NEIGHBOURS, NUM_NODES) # random regular graph
+elif GRAPH=='complete':
+    G = nx.complete_graph(NUM_NODES) # complete graph
+elif GRAPH=='cycle':
+    G = nx.cycle_graph(NUM_NODES) # cycle graph
+#G = nx.read_adjlist('input_adjlist.txt', delimiter=' ')
+# Get adjacency matrix and weight by delay at each channel
+ChannelDelays = 0.05*np.ones((NUM_NODES, NUM_NODES))+0.1*np.random.rand(NUM_NODES, NUM_NODES)
+AdjMatrix = np.multiply(1*np.asarray(nx.to_numpy_matrix(G)), ChannelDelays)
+Net = Network(AdjMatrix)
+T = 0
+
+app = dash.Dash(__name__)
+
+app.layout = html.Div([
+    dcc.Tabs(id="tabs-graph", value='inbox-graph', children=[
+        dcc.Tab(label='Inbox Lengths', value='inbox-graph'),
+        dcc.Tab(label='Number of Tips', value='tips-graph'),
+        dcc.Tab(label='Dissemination Rate', value='dissem-graph')
+    ]),
+    dcc.Graph(id='output-state', figure=fig),
+    html.Div(id='updates', children=0),
+    html.H2("Set Desired Issue Rates"),
+    html.Div([
+        html.Div([
+            "Node " + str(NodeID) + "\t",
+            dcc.Input(id='range' + str(NodeID), type='number', min=0, max=5, step=1, value=1)
+        ]) for NodeID in range(NUM_NODES)
+    ])
+])
+
+@app.callback(Output('output-state', 'figure'),
+              Output('updates', 'children'),
+              Input('updates', 'children'),
+              State('tabs-graph', 'value'))
+def update_line_chart(n_updates, tab):
+    # discrete time step size specified by global variable STEP
+    n_updates_out = n_updates + 1
+    InboxLens[:-n_steps] = InboxLens[n_steps:]
+    TipsSet[:-n_steps] = TipsSet[n_steps:]
+    Throughput[:-n_steps] = Throughput[n_steps:]
+    for i in range(n_steps):
+        global T
+        T = T + STEP
+        Net.simulate(T)
+        for NodeID in range(NUM_NODES):
+            Throughput[TimeSteps+i, NodeID] = Net.Throughput[NodeID]
+            InboxLens[TimeSteps-n_steps+i,NodeID] = len(Net.Nodes[NodeID].Inbox.AllPackets)
+            TipsSet[TimeSteps-n_steps+i,NodeID] = len(Net.Nodes[NodeID].TipsSet)
+    DissemRate = (Throughput[n_steps:]-Throughput[:-n_steps])/UPDATE_INTERVAL
+    if tab == 'inbox-graph':
+        fig_out = per_node_plotly_plot(T, InboxLens, 'Time', 'Inbox Length', 'Inbox Length Plot', avg_window=100)
+    elif tab == 'tips-graph':
+        fig_out = per_node_plotly_plot(T, TipsSet, 'Time', 'Number of Tips', 'Tip Set Plot', avg_window=100)
+    elif tab == 'dissem-graph':
+        fig_out = per_node_plotly_plot(T, DissemRate, 'Time', 'Dissemination Rate', 'Dissemination Rate Plot', avg_window=100)
+
+    return fig_out, n_updates_out
+
+@app.callback(Output('output-state', 'figure'),
+              Input('tabs-graph', 'value'))
+def tab_update(tab):
+    if tab == 'inbox-graph':
+        fig_out = per_node_plotly_plot(T, InboxLens, 'Time', 'Inbox Length', 'Inbox Length Plot', avg_window=100)
+    elif tab == 'tips-graph':
+        fig_out = per_node_plotly_plot(T, TipsSet, 'Time', 'Number of Tips', 'Tip Set Plot', avg_window=100)
+    elif tab == 'dissem-graph':
+        fig_out = per_node_plotly_plot(T, DissemRate, 'Time', 'Dissemination Rate', 'Dissemination Rate Plot', avg_window=100)
+    return fig_out
 
 np.random.seed(0)
     
@@ -37,7 +121,7 @@ def simulate():
     Lmds = [np.zeros((TimeSteps, NUM_NODES)) for mc in range(MONTE_CARLOS)]
     OldestTxAges = np.zeros((TimeSteps, NUM_NODES))
     OldestTxAge = []
-    InboxLens = [np.zeros((TimeSteps, NUM_NODES)) for mc in range(MONTE_CARLOS)]
+    
     ReadyLens = [np.zeros((TimeSteps, NUM_NODES)) for mc in range(MONTE_CARLOS)]
     Dropped = [np.zeros((TimeSteps, NUM_NODES)) for mc in range(MONTE_CARLOS)]
     NumTips = [np.zeros((TimeSteps, NUM_NODES)) for mc in range(MONTE_CARLOS)]
@@ -368,4 +452,5 @@ def plot_results(dirstr):
     all_node_plot(avgOTA, 'Time (sec)', 'Max time in transit (sec)', '', dirstr+'/plots/MaxAge.png')
 
 if __name__ == "__main__":
-        main()
+    app.run_server(debug=False)
+    main()
