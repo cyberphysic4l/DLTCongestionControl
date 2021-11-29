@@ -1,4 +1,2 @@
-# IOTARateControl
-Python simulator for AIMD congestion control in the IOTA network
-
-Install 
+# IOTA Access Control Simulator
+Python simulator for the IOTA Access/Congestion Control Algorithm (ICCA). 
