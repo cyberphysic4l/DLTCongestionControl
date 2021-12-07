@@ -48,55 +48,58 @@ app.layout = html.Div([
         dcc.Tab(label='Number of Tips', value='tips-graph'),
         dcc.Tab(label='Dissemination Rate', value='dissem-graph')
     ]),
+    html.Button('Start/Stop', id='startstop', n_clicks=0),
     dcc.Graph(id='output-state', figure=fig),
     html.Div(id='updates', children=0),
     html.H2("Set Desired Issue Rates"),
     html.Div([
         html.Div([
             "Node " + str(NodeID) + "\t",
-            dcc.Input(id='range' + str(NodeID), type='number', min=0, max=5, step=1, value=1)
-        ]) for NodeID in range(NUM_NODES)
-    ])
-])
+            dcc.Input(id='range' + str(NodeID), type='number', min=0, max=NU, step=0.1, value=int(10*Net.Nodes[NodeID].LambdaD)/10.0)
+        ]) for NodeID in range(NUM_NODES)]+
+        [html.Div(id = 'lambdad', children = 'Total desired Lambda = ' + str(sum([Node.LambdaD for Node in Net.Nodes]))),
+        html.Div(id = 'nu', children = 'Scheduler rate = ' + str (NU))]
+    )
+])    
 
 @app.callback(Output('output-state', 'figure'),
               Output('updates', 'children'),
+              Output('lambdad', 'children'),
               Input('updates', 'children'),
-              State('tabs-graph', 'value'))
-def update_line_chart(n_updates, tab):
+              State('tabs-graph', 'value'),
+              [State('range' + str(NodeID), 'value') for NodeID in range(NUM_NODES)],
+              State('startstop', 'n_clicks'))
+def update_line_chart(*args):
     # discrete time step size specified by global variable STEP
+    global T, DissemRate, InboxLens, TipsSet, Throughput
+    n_updates = args[0]
+    tab = args[1]
     n_updates_out = n_updates + 1
-    InboxLens[:-n_steps] = InboxLens[n_steps:]
-    TipsSet[:-n_steps] = TipsSet[n_steps:]
-    Throughput[:-n_steps] = Throughput[n_steps:]
-    for i in range(n_steps):
-        global T
-        T = T + STEP
-        Net.simulate(T)
-        for NodeID in range(NUM_NODES):
-            Throughput[TimeSteps+i, NodeID] = Net.Throughput[NodeID]
-            InboxLens[TimeSteps-n_steps+i,NodeID] = len(Net.Nodes[NodeID].Inbox.AllPackets)
-            TipsSet[TimeSteps-n_steps+i,NodeID] = len(Net.Nodes[NodeID].TipsSet)
-    DissemRate = (Throughput[n_steps:]-Throughput[:-n_steps])/UPDATE_INTERVAL
+    if True:#args[-1]%2!=0:
+        InboxLens[:-n_steps] = InboxLens[n_steps:]
+        TipsSet[:-n_steps] = TipsSet[n_steps:]
+        Throughput[:-n_steps] = Throughput[n_steps:]
+        for i in range(n_steps):
+            T = T + STEP
+            Net.simulate(T)
+            for NodeID in range(NUM_NODES):
+                if args[NodeID+2] is not None:
+                    if Net.Nodes[NodeID].LambdaD != args[NodeID+2]:
+                        Net.Nodes[NodeID].LambdaD = args[NodeID+2]
+                        Net.Nodes[NodeID].TranPool = []
+                Throughput[TimeSteps+i, NodeID] = Net.Throughput[NodeID]
+                InboxLens[TimeSteps-n_steps+i,NodeID] = len(Net.Nodes[NodeID].Inbox.AllPackets)
+                TipsSet[TimeSteps-n_steps+i,NodeID] = len(Net.Nodes[NodeID].TipsSet)
+        DissemRate = (Throughput[n_steps:]-Throughput[:-n_steps])/UPDATE_INTERVAL
     if tab == 'inbox-graph':
         fig_out = per_node_plotly_plot(T, InboxLens, 'Time', 'Inbox Length', 'Inbox Length Plot', avg_window=100)
     elif tab == 'tips-graph':
         fig_out = per_node_plotly_plot(T, TipsSet, 'Time', 'Number of Tips', 'Tip Set Plot', avg_window=100)
     elif tab == 'dissem-graph':
         fig_out = per_node_plotly_plot(T, DissemRate, 'Time', 'Dissemination Rate', 'Dissemination Rate Plot', avg_window=100)
+    lambdad = 'Total desired Lambda = ' + str(sum([Node.LambdaD for Node in Net.Nodes]))
 
-    return fig_out, n_updates_out
-
-@app.callback(Output('output-state', 'figure'),
-              Input('tabs-graph', 'value'))
-def tab_update(tab):
-    if tab == 'inbox-graph':
-        fig_out = per_node_plotly_plot(T, InboxLens, 'Time', 'Inbox Length', 'Inbox Length Plot', avg_window=100)
-    elif tab == 'tips-graph':
-        fig_out = per_node_plotly_plot(T, TipsSet, 'Time', 'Number of Tips', 'Tip Set Plot', avg_window=100)
-    elif tab == 'dissem-graph':
-        fig_out = per_node_plotly_plot(T, DissemRate, 'Time', 'Dissemination Rate', 'Dissemination Rate Plot', avg_window=100)
-    return fig_out
+    return fig_out, n_updates_out, lambdad
 
 np.random.seed(0)
     
@@ -104,8 +107,11 @@ def main():
     '''
     Create directory for storing results with these parameters
     '''
-    dirstr = simulate()
-    plot_results(dirstr)
+    if DASH:
+        app.run_server(debug=False)
+    else:
+        dirstr = simulate()
+        plot_results(dirstr)
     
 def simulate():
     """
@@ -125,6 +131,7 @@ def simulate():
     ReadyLens = [np.zeros((TimeSteps, NUM_NODES)) for mc in range(MONTE_CARLOS)]
     Dropped = [np.zeros((TimeSteps, NUM_NODES)) for mc in range(MONTE_CARLOS)]
     NumTips = [np.zeros((TimeSteps, NUM_NODES)) for mc in range(MONTE_CARLOS)]
+    InboxLens = [np.zeros((TimeSteps, NUM_NODES)) for mc in range(MONTE_CARLOS)]
     InboxLensMA = [np.zeros((TimeSteps, NUM_NODES)) for mc in range(MONTE_CARLOS)]
     Deficits = [np.zeros((TimeSteps, NUM_NODES)) for mc in range(MONTE_CARLOS)]
     Throughput = [np.zeros((TimeSteps, NUM_NODES)) for mc in range(MONTE_CARLOS)]
@@ -452,5 +459,4 @@ def plot_results(dirstr):
     all_node_plot(avgOTA, 'Time (sec)', 'Max time in transit (sec)', '', dirstr+'/plots/MaxAge.png')
 
 if __name__ == "__main__":
-    app.run_server(debug=False)
     main()

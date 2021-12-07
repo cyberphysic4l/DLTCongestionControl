@@ -6,7 +6,7 @@ SIM_TIME = 180
 STEP = 0.01
 # Network Parameters
 NU = 10
-NUM_NODES = 20
+NUM_NODES = 10
 NUM_NEIGHBOURS = 4
 START_TIMES = 10*np.ones(NUM_NODES)
 REPDIST = 'zipf'
@@ -40,4 +40,5 @@ GRAPH = 'regular'
 SCHEDULING = 'drr_lds'
 CONF_WEIGHT = 100
 
+DASH = True
 UPDATE_INTERVAL = 10

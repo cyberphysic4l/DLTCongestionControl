@@ -232,13 +232,14 @@ def per_node_plotly_plot(time, data: np.ndarray, xlabel: str, ylabel: str, title
     if modes is None:
         modes = list(set(MODE))
     mode_names = ['Inactive', 'Content','Best-effort', 'Malicious']
-    #colors = ['tab:gray', 'tab:blue', 'tab:red', 'tab:green']
+    colors = ['gray', 'blue', 'red', 'green']
     for NodeID in range(NUM_NODES):
         if MODE[NodeID] in modes and np.any(data[:, NodeID]):
             fig.add_trace(go.Scatter(x=np.arange((avg_window-1)*step-SIM_TIME+time, time, step),
                                      y=np.convolve(np.ones(avg_window)/avg_window, data[:,NodeID], 'valid'),
                                      mode='lines',
-                                     name="Node " + str(NodeID)))
+                                     name="Node " + str(NodeID),
+                                     line=dict(color=colors[MODE[NodeID]])))
     
     """ModeLines = [Line2D([0],[0],color=colors[mode], lw=4) for mode in modes]
     if len(modes)>1:

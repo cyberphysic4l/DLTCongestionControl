@@ -19,6 +19,7 @@ class Node:
         self.NodeID = NodeID
         self.Alpha = ALPHA*REP[NodeID]/sum(REP)
         self.Lambda = NU*REP[NodeID]/sum(REP)
+        self.LambdaD = MODE[NodeID]*NU*REP[NodeID]/sum(REP)
         self.BackOff = []
         self.LastBackOff = []
         self.LastScheduleTime = 0
@@ -33,42 +34,43 @@ class Node:
         self.ArrivalWorks = []
         self.InboxLatencies = []
         self.DroppedPackets = []
+        self.TranPool = []
         
     def issue_txs(self, Time):
         """
         Create new TXs at rate lambda and do PoW
         """
-        if MODE[self.NodeID]>0:
-            if MODE[self.NodeID]==2:
-                if self.BackOff:
-                    self.LastIssueTime += TAU#BETA*REP[self.NodeID]/self.Lambda
-                while Time+STEP >= self.LastIssueTime + self.LastIssueWork/self.Lambda:
-                    self.LastIssueTime += self.LastIssueWork/self.Lambda
-                    Parents = self.select_tips()
-                    #Work = np.random.uniform(AVG_WORK[self.NodeID]-0.5, AVG_WORK[self.NodeID]+0.5)
-                    if IOT[self.NodeID]:
-                        Work = np.random.uniform(IOTLOW,IOTHIGH)
-                    else:
-                        Work = 1
-                    self.LastIssueWork = Work
-                    self.IssuedTrans.append(Transaction(self.LastIssueTime, Parents, self, self.Network, Work=Work))
-            elif MODE[self.NodeID]==1:
-                if IOT[self.NodeID]:
-                    Work = np.random.uniform(IOTLOW,IOTHIGH)
-                else:
-                    Work = 1
-                times = np.sort(np.random.uniform(Time, Time+STEP, np.random.poisson(STEP*self.Lambda/Work)))
-                for t in times:
-                    Parents = self.select_tips()
-                    #Work = np.random.uniform(AVG_WORK[self.NodeID]-0.5, AVG_WORK[self.NodeID]+0.5)
-                    self.IssuedTrans.append(Transaction(t, Parents, self, self.Network, Work=Work))
+        if self.LambdaD:
+            if IOT[self.NodeID]:
+                Work = np.random.uniform(IOTLOW,IOTHIGH)
             else:
                 Work = 1
-                times = np.sort(np.random.uniform(Time, Time+STEP, np.random.poisson(STEP*self.Lambda/Work)))
-                for t in times:
-                    Parents = self.select_tips()
-                    #Work = np.random.uniform(AVG_WORK[self.NodeID]-0.5, AVG_WORK[self.NodeID]+0.5)
-                    self.IssuedTrans.append(Transaction(t, Parents, self, self.Network, Work=Work))
+            times = np.sort(np.random.uniform(Time, Time+STEP, np.random.poisson(STEP*self.LambdaD/Work)))
+            for t in times:
+                Parents = []
+                self.TranPool.append(Transaction(t, Parents, self, self.Network, Work=Work))
+
+        if MODE[self.NodeID]<3:
+            if self.BackOff:
+                self.LastIssueTime += TAU#BETA*REP[self.NodeID]/self.Lambda
+            while Time+STEP >= self.LastIssueTime + self.LastIssueWork/self.Lambda and self.TranPool:
+                OldestTranTime = self.TranPool[0].IssueTime
+                if OldestTranTime>Time+STEP:
+                    break
+                self.LastIssueTime = max(OldestTranTime, self.LastIssueTime+self.LastIssueWork/self.Lambda)
+                Tran = self.TranPool.pop(0)
+                Tran.Parents = self.select_tips()
+                Tran.IssueTime = self.LastIssueTime
+                self.LastIssueWork = Tran.Work
+                self.IssuedTrans.append(Tran)
+
+        else:
+            Work = 1
+            times = np.sort(np.random.uniform(Time, Time+STEP, np.random.poisson(STEP*self.Lambda/Work)))
+            for t in times:
+                Parents = self.select_tips()
+                #Work = np.random.uniform(AVG_WORK[self.NodeID]-0.5, AVG_WORK[self.NodeID]+0.5)
+                self.IssuedTrans.append(Transaction(t, Parents, self, self.Network, Work=Work))
                 
         # check PoW completion
         while self.IssuedTrans:
@@ -207,8 +209,8 @@ class Node:
         """
         Additively increase or multiplicatively decrease lambda
         """
-        if MODE[self.NodeID]>0:
-            if MODE[self.NodeID]==2 and Time>=START_TIMES[self.NodeID]: # AIMD starts after 1 min adjustment
+        if MODE[self.NodeID]>=0:
+            if Time>=START_TIMES[self.NodeID]: # AIMD starts after 1 min adjustment
                 # if wait time has not passed---reset.
                 if self.LastBackOff:
                     if Time < self.LastBackOff + TAU:#BETA*REP[self.NodeID]/self.Lambda:
@@ -225,8 +227,6 @@ class Node:
                 self.Lambda = NU*REP[self.NodeID]/sum(REP)
             else: # malicious
                 self.Lambda = 3*NU*REP[self.NodeID]/sum(REP)
-        else:
-            self.Lambda = 0
             
     def enqueue(self, Packet, Time):
         """
