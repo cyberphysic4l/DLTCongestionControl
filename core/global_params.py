@@ -2,7 +2,7 @@ import numpy as np
 
 # Simulation Parameters
 MONTE_CARLOS = 1
-SIM_TIME = 180
+SIM_TIME = 500
 STEP = 0.01
 # Network Parameters
 NU = 10
@@ -20,6 +20,7 @@ elif REPDIST=='uniform':
     REP = np.ones(NUM_NODES, dtype=int)
 # Modes: 0 = inactive, 1 = content, 2 = best-effort, 3 = malicious
 MODE = [2-NodeID%3 for NodeID in range(NUM_NODES)]
+MODE[3] = 3
 IOT = np.zeros(NUM_NODES)
 IOTLOW = 0.5
 IOTHIGH = 1
@@ -34,8 +35,14 @@ MAX_TH = MIN_TH
 QUANTUM = [MAX_WORK*rep/sum(REP) for rep in REP]
 W_Q = 0.1
 P_B = 0.5
-MAX_BUFFER = 1000
+MAX_BUFFER = 300
 GRAPH = 'regular'
 
 SCHEDULING = 'drr_lds'
-CONF_WEIGHT = 10
+CONF_WEIGHT = 100
+
+DASH = False
+UPDATE_INTERVAL = 10
+
+SELECT_TIPS = 'issue'
+TSC = 60

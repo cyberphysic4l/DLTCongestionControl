@@ -19,6 +19,7 @@ class Node:
         self.NodeID = NodeID
         self.Alpha = ALPHA*REP[NodeID]/sum(REP)
         self.Lambda = NU*REP[NodeID]/sum(REP)
+        self.LambdaD = MODE[NodeID]*NU*REP[NodeID]/sum(REP)
         self.BackOff = []
         self.LastBackOff = []
         self.LastScheduleTime = 0
@@ -32,43 +33,47 @@ class Node:
         self.ArrivalTimes = []
         self.ArrivalWorks = []
         self.InboxLatencies = []
-        self.DroppedPackets = []
+        self.DroppedPackets = [[] for NodeID in range(NUM_NODES)]
+        self.TranPool = []
         
     def issue_txs(self, Time):
         """
         Create new TXs at rate lambda and do PoW
         """
-        if MODE[self.NodeID]>0:
-            if MODE[self.NodeID]==2:
-                if self.BackOff:
-                    self.LastIssueTime += TAU#BETA*REP[self.NodeID]/self.Lambda
-                while Time+STEP >= self.LastIssueTime + self.LastIssueWork/self.Lambda:
-                    self.LastIssueTime += self.LastIssueWork/self.Lambda
-                    Parents = self.select_tips()
-                    #Work = np.random.uniform(AVG_WORK[self.NodeID]-0.5, AVG_WORK[self.NodeID]+0.5)
-                    if IOT[self.NodeID]:
-                        Work = np.random.uniform(IOTLOW,IOTHIGH)
-                    else:
-                        Work = 1
-                    self.LastIssueWork = Work
-                    self.IssuedTrans.append(Transaction(self.LastIssueTime, Parents, self, self.Network, Work=Work))
-            elif MODE[self.NodeID]==1:
-                if IOT[self.NodeID]:
-                    Work = np.random.uniform(IOTLOW,IOTHIGH)
-                else:
-                    Work = 1
-                times = np.sort(np.random.uniform(Time, Time+STEP, np.random.poisson(STEP*self.Lambda/Work)))
-                for t in times:
-                    Parents = self.select_tips()
-                    #Work = np.random.uniform(AVG_WORK[self.NodeID]-0.5, AVG_WORK[self.NodeID]+0.5)
-                    self.IssuedTrans.append(Transaction(t, Parents, self, self.Network, Work=Work))
+        if self.LambdaD:
+            if IOT[self.NodeID]:
+                Work = np.random.uniform(IOTLOW,IOTHIGH)
             else:
                 Work = 1
-                times = np.sort(np.random.uniform(Time, Time+STEP, np.random.poisson(STEP*self.Lambda/Work)))
-                for t in times:
-                    Parents = self.select_tips()
-                    #Work = np.random.uniform(AVG_WORK[self.NodeID]-0.5, AVG_WORK[self.NodeID]+0.5)
-                    self.IssuedTrans.append(Transaction(t, Parents, self, self.Network, Work=Work))
+            times = np.sort(np.random.uniform(Time, Time+STEP, np.random.poisson(STEP*self.LambdaD/Work)))
+            for t in times:
+                Parents = []
+                self.TranPool.append(Transaction(t, Parents, self, self.Network, Work=Work))
+
+        if MODE[self.NodeID]<3:
+            if self.BackOff:
+                self.LastIssueTime += TAU#BETA*REP[self.NodeID]/self.Lambda
+            while Time+STEP >= self.LastIssueTime + self.LastIssueWork/self.Lambda and self.TranPool:
+                OldestTranTime = self.TranPool[0].IssueTime
+                if OldestTranTime>Time+STEP:
+                    break
+                self.LastIssueTime = max(OldestTranTime, self.LastIssueTime+self.LastIssueWork/self.Lambda)
+                Tran = self.TranPool.pop(0)
+                if SELECT_TIPS=='issue':
+                    Tran.Parents = self.select_tips(Time)
+                else:
+                    Tran.Parents = []
+                Tran.IssueTime = self.LastIssueTime
+                self.LastIssueWork = Tran.Work
+                self.IssuedTrans.append(Tran)
+
+        else:
+            Work = 1
+            times = np.sort(np.random.uniform(Time, Time+STEP, np.random.poisson(STEP*self.Lambda/Work)))
+            for t in times:
+                Parents = self.select_tips(Time)
+                #Work = np.random.uniform(AVG_WORK[self.NodeID]-0.5, AVG_WORK[self.NodeID]+0.5)
+                self.IssuedTrans.append(Transaction(t, Parents, self, self.Network, Work=Work))
                 
         # check PoW completion
         while self.IssuedTrans:
@@ -79,21 +84,26 @@ class Node:
             if MODE[self.NodeID]==3: # malicious don't consider own txs for scheduling
                 self.schedule(self, Tran, Tran.IssueTime)
     
-    def select_tips(self):
+    def select_tips(self, Time):
         """
-        Implements uniform random tip selection
+        Implements uniform random tip selection with TSC fishing
         """
-        if len(self.TipsSet)>1:
-            ts = self.TipsSet
-            Selection = sample(ts, k=2)
-        else:
-            eligibleLedger = [tran for _,tran in self.Ledger.items() if tran.Eligible] 
-            if len(eligibleLedger)>1:
-                Selection = sample(eligibleLedger, k=2)
+        done = False
+        while not done:
+            done = True
+            if len(self.TipsSet)>1:
+                ts = self.TipsSet
+                Selection = sample(ts, k=2)
+                for tip in Selection:
+                    if tip.IssueTime < Time - TSC:
+                        self.TipsSet.remove(tip)
+                        done = False
             else:
-                Selection = eligibleLedger # genesis
-        if not (len(Selection)==1 or len(Selection)==2):
-            print(eligibleLedger)
+                eligibleLedger = [tran for _,tran in self.Ledger.items() if tran.Eligible] 
+                if len(eligibleLedger)>1:
+                    Selection = sample(eligibleLedger, k=2)
+                else:
+                    Selection = eligibleLedger # genesis
         return Selection
     
     def schedule_txs(self, Time):
@@ -176,10 +186,7 @@ class Node:
             p.Children.append(Tran)
         Tran.updateAW(self)
         
-        if Tran.NodeID==self.NodeID:
-            self.Undissem += 1
-            self.UndissemWork += Tran.Work
-            Tran.VisibleTime = Time
+        
         # mark this TX as received by this node
         self.Network.InformedNodes[Tran.Index] += 1
         if self.Network.InformedNodes[Tran.Index]==NUM_NODES:
@@ -190,6 +197,12 @@ class Node:
             self.Network.DissemTimes[Tran.Index] = Time
             self.Network.Nodes[Tran.NodeID].Undissem -= 1
             self.Network.Nodes[Tran.NodeID].UndissemWork -= Tran.Work
+        if Tran.NodeID==self.NodeID:
+            self.Undissem += 1
+            self.UndissemWork += Tran.Work
+            Tran.VisibleTime = Time
+            if MODE[self.NodeID]==3:
+                return # don't enqueue own transactions if malicious
 
         self.enqueue(Packet, Time)
     
@@ -207,8 +220,8 @@ class Node:
         """
         Additively increase or multiplicatively decrease lambda
         """
-        if MODE[self.NodeID]>0:
-            if MODE[self.NodeID]==2 and Time>=START_TIMES[self.NodeID]: # AIMD starts after 1 min adjustment
+        if MODE[self.NodeID]>=0:
+            if Time>=START_TIMES[self.NodeID]: # AIMD starts after 1 min adjustment
                 # if wait time has not passed---reset.
                 if self.LastBackOff:
                     if Time < self.LastBackOff + TAU:#BETA*REP[self.NodeID]/self.Lambda:
@@ -225,8 +238,6 @@ class Node:
                 self.Lambda = NU*REP[self.NodeID]/sum(REP)
             else: # malicious
                 self.Lambda = 3*NU*REP[self.NodeID]/sum(REP)
-        else:
-            self.Lambda = 0
             
     def enqueue(self, Packet, Time):
         """
@@ -248,4 +259,4 @@ class Node:
                     MalNodeID = np.argmax(ScaledWork)
                     packet = self.Inbox.Packets[MalNodeID][0]
                     self.Inbox.remove_packet(packet)
-                    self.DroppedPackets.append(packet)
+                    self.DroppedPackets[MalNodeID].append(packet)
