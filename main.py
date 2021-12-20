@@ -7,6 +7,7 @@ import matplotlib.pyplot as plt
 from matplotlib.lines import Line2D
 import networkx as nx
 import os
+import shutil
 import sys
 from time import gmtime, strftime
 from core.global_params import *
@@ -19,11 +20,13 @@ import dash_core_components as dcc
 import dash_html_components as html
 from dash.dependencies import Input, Output, State
 import pandas as pd
+import webbrowser
 
 TimeSteps = int(SIM_TIME/STEP)
 n_steps = UPDATE_INTERVAL*int(1/STEP)
 InboxLens = np.zeros((int(SIM_TIME/STEP), NUM_NODES))
 TipsSet = np.zeros((int(SIM_TIME/STEP), NUM_NODES))
+HonTipsSet = np.zeros((int(SIM_TIME/STEP), NUM_NODES))
 Throughput = np.zeros((int((SIM_TIME+UPDATE_INTERVAL)/STEP), NUM_NODES))
 DissemRate = np.zeros((int(SIM_TIME/STEP), NUM_NODES))
 fig = per_node_plotly_plot(0, InboxLens, 'Time', 'Inbox Length', 'Inbox Length Plot', avg_window=100)
@@ -46,6 +49,7 @@ app.layout = html.Div([
     dcc.Tabs(id="tabs-graph", value='inbox-graph', children=[
         dcc.Tab(label='Inbox Lengths', value='inbox-graph'),
         dcc.Tab(label='Number of Tips', value='tips-graph'),
+        dcc.Tab(label='Number of Honest Tips', value='hontips-graph'),
         dcc.Tab(label='Dissemination Rate', value='dissem-graph')
     ]),
     html.Button('Start/Stop', id='startstop', n_clicks=0),
@@ -67,33 +71,35 @@ app.layout = html.Div([
               Output('lambdad', 'children'),
               Input('updates', 'children'),
               State('tabs-graph', 'value'),
-              [State('range' + str(NodeID), 'value') for NodeID in range(NUM_NODES)],
-              State('startstop', 'n_clicks'))
+              [State('range' + str(NodeID), 'value') for NodeID in range(NUM_NODES)])
 def update_line_chart(*args):
     # discrete time step size specified by global variable STEP
-    global T, DissemRate, InboxLens, TipsSet, Throughput
+    global T, DissemRate, InboxLens, TipsSet, HonTipsSet, Throughput
     n_updates = args[0]
     tab = args[1]
     n_updates_out = n_updates + 1
-    if True:#args[-1]%2!=0:
-        InboxLens[:-n_steps] = InboxLens[n_steps:]
-        TipsSet[:-n_steps] = TipsSet[n_steps:]
-        Throughput[:-n_steps] = Throughput[n_steps:]
-        for i in range(n_steps):
-            T = T + STEP
-            Net.simulate(T)
-            for NodeID in range(NUM_NODES):
-                if args[NodeID+2] is not None:
-                    if Net.Nodes[NodeID].LambdaD != args[NodeID+2]:
-                        Net.Nodes[NodeID].LambdaD = args[NodeID+2]
-                        Net.Nodes[NodeID].TranPool = []
-                Throughput[TimeSteps+i, NodeID] = Net.Throughput[NodeID]
-                InboxLens[TimeSteps-n_steps+i,NodeID] = len(Net.Nodes[NodeID].Inbox.AllPackets)
-                TipsSet[TimeSteps-n_steps+i,NodeID] = len(Net.Nodes[NodeID].TipsSet)
-        DissemRate = (Throughput[n_steps:]-Throughput[:-n_steps])/UPDATE_INTERVAL
+    InboxLens[:-n_steps] = InboxLens[n_steps:]
+    TipsSet[:-n_steps] = TipsSet[n_steps:]
+    HonTipsSet[:-n_steps] = HonTipsSet[n_steps:]
+    Throughput[:-n_steps] = Throughput[n_steps:]
+    for i in range(n_steps):
+        T = T + STEP
+        Net.simulate(T)
+        for NodeID in range(NUM_NODES):
+            if args[NodeID+2] is not None:
+                if Net.Nodes[NodeID].LambdaD != args[NodeID+2]:
+                    Net.Nodes[NodeID].LambdaD = args[NodeID+2]
+                    Net.Nodes[NodeID].TranPool = []
+            Throughput[TimeSteps+i, NodeID] = Net.Throughput[NodeID]
+            InboxLens[TimeSteps-n_steps+i,NodeID] = len(Net.Nodes[NodeID].Inbox.AllPackets)
+            TipsSet[TimeSteps-n_steps+i,NodeID] = len(Net.Nodes[NodeID].TipsSet)
+            HonTipsSet[TimeSteps-n_steps+i,NodeID] = len([tip for tip in Net.Nodes[NodeID].TipsSet if tip.NodeID!=3])
+    DissemRate = (Throughput[n_steps:]-Throughput[:-n_steps])/UPDATE_INTERVAL
     if tab == 'inbox-graph':
         fig_out = per_node_plotly_plot(T, InboxLens, 'Time', 'Inbox Length', 'Inbox Length Plot', avg_window=100)
     elif tab == 'tips-graph':
+        fig_out = per_node_plotly_plot(T, TipsSet, 'Time', 'Number of Tips', 'Tip Set Plot', avg_window=100)
+    elif tab == 'hontips-graph':
         fig_out = per_node_plotly_plot(T, TipsSet, 'Time', 'Number of Tips', 'Tip Set Plot', avg_window=100)
     elif tab == 'dissem-graph':
         fig_out = per_node_plotly_plot(T, DissemRate, 'Time', 'Dissemination Rate', 'Dissemination Rate Plot', avg_window=100)
@@ -108,6 +114,7 @@ def main():
     Create directory for storing results with these parameters
     '''
     if DASH:
+        webbrowser.open('http://127.0.0.1:8050/')
         app.run_server(debug=False)
     else:
         dirstr = simulate()
@@ -127,7 +134,7 @@ def simulate():
     Lmds = [np.zeros((TimeSteps, NUM_NODES)) for mc in range(MONTE_CARLOS)]
     OldestTxAges = np.zeros((TimeSteps, NUM_NODES))
     OldestTxAge = []
-    
+    Droppees = {}
     ReadyLens = [np.zeros((TimeSteps, NUM_NODES)) for mc in range(MONTE_CARLOS)]
     Dropped = [np.zeros((TimeSteps, NUM_NODES)) for mc in range(MONTE_CARLOS)]
     NumTips = [np.zeros((TimeSteps, NUM_NODES)) for mc in range(MONTE_CARLOS)]
@@ -178,24 +185,26 @@ def simulate():
             """
             Net.simulate(T)
             # save summary results in output arrays
-            for NodeID in range(NUM_NODES):
-                Lmds[mc][i, NodeID] = Net.Nodes[NodeID].Lambda
-                if Net.Nodes[NodeID].Inbox.AllPackets and MODE[NodeID]<3: #don't include malicious nodes
-                    HonestPackets = [p for p in Net.Nodes[NodeID].Inbox.AllPackets if MODE[p.Data.NodeID]<3]
+            for NodeID, Node in enumerate(Net.Nodes):
+                Lmds[mc][i, NodeID] = Node.Lambda
+                if Node.Inbox.AllPackets and MODE[NodeID]<3: #don't include malicious nodes
+                    HonestPackets = [p for p in Node.Inbox.AllPackets if MODE[p.Data.NodeID]<3]
                     if HonestPackets:
                         OldestPacket = min(HonestPackets, key=lambda x: x.Data.IssueTime)
                         OldestTxAges[i,NodeID] = T - OldestPacket.Data.IssueTime
-                InboxLens[mc][i,NodeID] = len(Net.Nodes[NodeID].Inbox.AllPackets)
-                ReadyLens[mc][i,NodeID] = len(Net.Nodes[NodeID].Inbox.ReadyPackets)
-                Dropped[mc][i,NodeID] = len(Net.Nodes[NodeID].DroppedPackets)
-                NumTips[mc][i,NodeID] = len(Net.Nodes[NodeID].TipsSet)
+                InboxLens[mc][i,NodeID] = len(Node.Inbox.AllPackets)
+                ReadyLens[mc][i,NodeID] = len(Node.Inbox.ReadyPackets)
+                Dropped[mc][i,NodeID] = sum([len(Node.DroppedPackets[i]) for i in range(NUM_NODES)])
+                if sum([len(n.DroppedPackets[NodeID]) for n in Net.Nodes]):
+                    Droppees[NodeID] = sum([len(n.DroppedPackets[NodeID]) for n in Net.Nodes])
+                NumTips[mc][i,NodeID] = len(Node.TipsSet)
                 #This measurement takes ages so left out unless needed.
                 #Unsolid[mc][i,NodeID] = len([tran for _,tran in Net.Nodes[NodeID].Ledger.items() if not tran.Solid])
-                InboxLensMA[mc][i,NodeID] = Net.Nodes[NodeID].Inbox.Avg
+                InboxLensMA[mc][i,NodeID] = Node.Inbox.Avg
                 Deficits[mc][i, NodeID] = Net.Nodes[0].Inbox.Deficit[NodeID]
                 Throughput[mc][i, NodeID] = Net.Throughput[NodeID]
                 WorkThroughput[mc][i,NodeID] = Net.WorkThroughput[NodeID]
-                Undissem[mc][i,NodeID] = Net.Nodes[NodeID].Undissem
+                Undissem[mc][i,NodeID] = Node.Undissem
         print("Simulation: "+str(mc) +"\t 100% Complete")
         OldestTxAge.append(np.mean(OldestTxAges, axis=1))
         for i in range(SIM_TIME):
@@ -230,6 +239,7 @@ def simulate():
     """
     Get results
     """
+    print(Droppees)
     avgLmds = sum(Lmds)/len(Lmds)
     avgTP = sum(TP)/len(TP)
     avgWTP = sum(WTP)/len(WTP)
@@ -252,31 +262,7 @@ def simulate():
     os.makedirs(dirstr, exist_ok=True)
     os.makedirs(dirstr+'/raw', exist_ok=True)
     os.makedirs(dirstr+'/plots', exist_ok=True)
-    np.savetxt(dirstr+'/config.txt', ['MCs = ' + str(MONTE_CARLOS) +
-                                      '\nsimtime = ' + str(SIM_TIME) +
-                                      '\nstep = ' + str(STEP) +
-                                      '\n\n# Network Parameters' +
-                                      '\nnu = ' + str(NU) +
-                                      '\nnumber of nodes = ' + str(NUM_NODES) +
-                                      '\nnumber of neighbours = ' + str(NUM_NEIGHBOURS) +
-                                      '\ngraph topology = ' + GRAPH +
-                                      '\nrepdist = ' + str(REPDIST) +
-                                      '\nmodes = ' + str(MODE) +
-                                      '\niot = ' + str(IOT) +
-                                      '\niotlow = ' + str(IOTLOW) +
-                                      '\niothigh = ' + str(IOTHIGH) +
-                                      '\ndcmax = ' + str(MAX_WORK) +
-                                      '\n\n# Congestion Control Parameters' +
-                                      '\nalpha = ' + str(ALPHA) +
-                                      '\nbeta = ' + str(BETA) +
-                                      '\ntau = ' + str(TAU) + 
-                                      '\nminth = ' + str(MIN_TH) +
-                                      '\nmaxth = ' + str(MAX_TH) +
-                                      '\nquantum = ' + str(QUANTUM) +
-                                      '\nw_q = ' + str(W_Q) +
-                                      '\np_b = ' + str(P_B) +
-                                      '\nsched=' + SCHEDULING], delimiter = " ", fmt='%s')
-    
+    shutil.copy("core/global_params.py", dirstr+"/global_params.txt")
     np.savetxt(dirstr+'/raw/avgLmds.csv', avgLmds, delimiter=',')
     np.savetxt(dirstr+'/raw/avgTP.csv', avgTP, delimiter=',')
     np.savetxt(dirstr+'/raw/avgWTP.csv', avgWTP, delimiter=',')
@@ -412,10 +398,10 @@ def plot_results(dirstr):
 
     per_node_plot(avgLmds, 'Time (sec)', r'$\lambda_i$', '', dirstr+'/plots/IssueRates.png', avg_window=1, modes=[1,2])
     
-    per_node_plot(avgInboxLen, 'Time (sec)', 'Inbox length', '', dirstr+'/plots/AvgInboxLen.png')
-    per_node_plot(avgReadyLen, 'Time (sec)', 'Ready length', '', dirstr+'/plots/AvgReadyLen.png')
-    per_node_plot(avgDropped, 'Time (sec)', 'Dropped Transactions', '', dirstr+'/plots/AvgDropped.png')
-    per_node_plot(avgInboxLen-avgReadyLen, 'Time (sec)', 'Not Ready length', '', dirstr+'/plots/AvgNonReadyLen.png')
+    per_node_plot(avgInboxLen, 'Time (sec)', 'Inbox length', '', dirstr+'/plots/AvgInboxLen.png', avg_window=100)
+    per_node_plot(avgReadyLen, 'Time (sec)', 'Ready length', '', dirstr+'/plots/AvgReadyLen.png', avg_window=100)
+    per_node_plot(avgDropped, 'Time (sec)', 'Dropped Transactions', '', dirstr+'/plots/AvgDropped.png', avg_window=100)
+    per_node_plot(avgInboxLen-avgReadyLen, 'Time (sec)', 'Not Ready length', '', dirstr+'/plots/AvgNonReadyLen.png', avg_window=100)
 
     per_node_plot(avgNumTips, 'Time (sec)', 'Number of Tips', '', dirstr+'/plots/AvgNumTips.png')
     per_node_plot(avgEligibleDelays, 'Time (sec)', 'Eligible Delays', '', dirstr+'/plots/AvgEligibleDelays.png', avg_window=20, step=1)
