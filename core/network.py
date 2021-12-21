@@ -29,26 +29,17 @@ class Network:
             RowList = []
             for j in np.nditer(np.nonzero(self.A[i,:])):
                 self.Nodes[i].Neighbours.append(self.Nodes[j])
+                self.Nodes[i].NeighbForward.append([n for n in range(NUM_NODES)])
                 RowList.append(CommChannel(self.Nodes[i],self.Nodes[j],self.A[i][j]))
+            self.Nodes[i].NeighbRx = [self.Nodes[i].Neighbours for _ in range(NUM_NODES)]
             self.CommChannels.append(RowList)
     
     def send_data(self, TxNode, RxNode, Data, Time):
         """
         Send this data (TX or back off) to a specified neighbour
         """
-        CC = self.CommChannels[TxNode.NodeID][TxNode.Neighbours.index(RxNode)]
-        CC.send_packet(TxNode, RxNode, Data, Time)
-        
-    def broadcast_data(self, TxNode, LastTxNode, Data, Time):
-        """
-        Send this data (TX or back off) to all neighbours
-        """
-        for i, CC in enumerate(self.CommChannels[self.Nodes.index(TxNode)]):
-            # do not send to this node if it was received from this node
-            if isinstance(Data, tran.Transaction):
-                if LastTxNode==TxNode.Neighbours[i]:
-                    continue
-            CC.send_packet(TxNode, TxNode.Neighbours[i], Data, Time)
+        cc = self.CommChannels[TxNode.NodeID][TxNode.Neighbours.index(RxNode)]
+        cc.send_packet(TxNode, RxNode, Data, Time)
         
     def simulate(self, Time):
         """
@@ -59,9 +50,9 @@ class Network:
         """
         Move packets through all comm channels
         """
-        for CCs in self.CommChannels:
-            for CC in CCs:
-                CC.transmit_packets(Time+STEP)
+        for ccs in self.CommChannels:
+            for cc in ccs:
+                cc.transmit_packets(Time+STEP)
         """
         Each node schedule transactions in inbox
         """
@@ -121,9 +112,8 @@ class CommChannel:
             TranID = Packet.Data.TranID
             Tran = self.RxNode.Ledger[TranID]
             self.RxNode.Network.send_data(self.RxNode, self.TxNode, Tran, Time)
-        else:
-            # else this is a back off notification
-            self.RxNode.process_cong_notif(Packet, Time)
+        elif isinstance(Packet, tran.PruneRequest):
+            Packet.RxNode.prune(Packet.TxNode, Packet.Data.NodeID, Packet.Data.Forward)
         PacketIndex = self.Packets.index(Packet)
         self.Packets.remove(Packet)
         del self.PacketDelays[PacketIndex]

@@ -1,6 +1,6 @@
 from .global_params import *
 from .inbox import Inbox
-from .transaction import Transaction
+from .transaction import PruneRequest, Transaction
 from . import network as net
 import numpy as np
 from random import sample
@@ -14,6 +14,8 @@ class Node:
         self.TipsSet = [g]
         self.Ledger = {0: g}
         self.Neighbours = []
+        self.NeighbForward = [] # list for each neighbour of NodeIDs to forward to this neighbour
+        self.NeighbRx = [] # list for each node of neighbours responsible for forwarding each NodeID to self
         self.Network = Network
         self.Inbox = Inbox(self)
         self.NodeID = NodeID
@@ -149,14 +151,28 @@ class Node:
         Tran.mark_eligible(self)
         Tran.EligibleTime = Time
         # broadcast the packet
-        self.Network.broadcast_data(self, TxNode, Tran, Time)
+        self.forward(TxNode, Tran, Time)
+
+    def forward(self, TxNode, Tran, Time):
+        for i, neighb in enumerate(self.Neighbours):
+            if neighb == TxNode:
+                continue
+            if Tran.NodeID in self.NeighbForward[i]:
+                self.Network.send_data(self, neighb, Tran, Time)
+            else:
+                print("not in forwarding list")
 
     def parse(self, Packet, Time):
         """
         Not fully implemented yet
-        Simply makes a copy of the transaction and then calls the solidifier
         """
         if Packet.Data.Index in self.Ledger: # return if this tranaction is already booked
+            if PRUNING and Time>START_TIMES[self.NodeID]:
+                if Packet.TxNode in self.NeighbRx[Packet.Data.NodeID]: # if this node is still responsible for delivering this traffic
+                    if len(self.NeighbRx[Packet.Data.NodeID])>1: # if anyone else is responsible too, then remove this transmitting node
+                        p = PruneRequest(Packet.Data.NodeID)
+                        self.Network.send_data(self, Packet.TxNode, p, Time)
+                        self.NeighbRx[Packet.Data.NodeID].remove(Packet.TxNode)
             return
         Packet.Data = Packet.Data.copy(self)
         Tran = Packet.Data
@@ -260,3 +276,9 @@ class Node:
                     packet = self.Inbox.Packets[MalNodeID][0]
                     self.Inbox.remove_packet(packet)
                     self.DroppedPackets[MalNodeID].append(packet)
+
+    def prune(self, TxNode, NodeID, Forward):
+        neighbID = self.Neighbours.index(TxNode)
+        if not Forward:
+            if NodeID in self.NeighbForward[neighbID]:
+                self.NeighbForward[neighbID].remove(NodeID)

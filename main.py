@@ -11,7 +11,7 @@ import shutil
 import sys
 from time import gmtime, strftime
 from core.global_params import *
-from core.network import Network
+from core.network import Network, Packet
 from utils import all_node_plot, per_node_barplot, per_node_plot, per_node_plotly_plot, plot_cdf
 import plotly.express as px
 import plotly.graph_objects as go
@@ -131,6 +131,7 @@ def simulate():
     """
     Monte Carlo Sims
     """
+    PacketsInTransit = [np.zeros(TimeSteps) for mc in range(MONTE_CARLOS)]
     Lmds = [np.zeros((TimeSteps, NUM_NODES)) for mc in range(MONTE_CARLOS)]
     OldestTxAges = np.zeros((TimeSteps, NUM_NODES))
     OldestTxAge = []
@@ -185,6 +186,7 @@ def simulate():
             """
             Net.simulate(T)
             # save summary results in output arrays
+            PacketsInTransit[mc][i] = sum([sum([len(cc.Packets) for cc in ccs]) for ccs in Net.CommChannels])
             for NodeID, Node in enumerate(Net.Nodes):
                 Lmds[mc][i, NodeID] = Node.Lambda
                 if Node.Inbox.AllPackets and MODE[NodeID]<3: #don't include malicious nodes
@@ -240,6 +242,7 @@ def simulate():
     Get results
     """
     print(Droppees)
+    avgPIT = sum(PacketsInTransit)/len(PacketsInTransit)
     avgLmds = sum(Lmds)/len(Lmds)
     avgTP = sum(TP)/len(TP)
     avgWTP = sum(WTP)/len(WTP)
@@ -264,6 +267,7 @@ def simulate():
     os.makedirs(dirstr+'/plots', exist_ok=True)
     shutil.copy("core/global_params.py", dirstr+"/global_params.txt")
     np.savetxt(dirstr+'/raw/avgLmds.csv', avgLmds, delimiter=',')
+    np.savetxt(dirstr+'/raw/avgPIT.csv', avgPIT, delimiter=',')
     np.savetxt(dirstr+'/raw/avgTP.csv', avgTP, delimiter=',')
     np.savetxt(dirstr+'/raw/avgWTP.csv', avgWTP, delimiter=',')
     np.savetxt(dirstr+'/raw/avgInboxLen.csv', avgInboxLen, delimiter=',')
@@ -301,6 +305,7 @@ def plot_results(dirstr):
     """
     Load results from the data directory
     """
+    avgPIT = np.loadtxt(dirstr+'/raw/avgPIT.csv', delimiter=',')
     avgLmds = np.loadtxt(dirstr+'/raw/avgLmds.csv', delimiter=',')
     #avgTP = np.loadtxt(dirstr+'/avgTP.csv', delimiter=',')
     avgTP = np.loadtxt(dirstr+'/raw/avgWTP.csv', delimiter=',')
@@ -392,7 +397,7 @@ def plot_results(dirstr):
     plt.savefig(dirstr+'/plots/Throughput.png', bbox_inches='tight')
     
 
-    plot_cdf(latencies, 'Latency (sec)', dirstr+'/plots/Latency.png')
+    #plot_cdf(latencies, 'Latency (sec)', dirstr+'/plots/Latency.png')
     
     #ax4.plot(np.arange(0, SIM_TIME, STEP), np.sum(avgLmds, axis=1), color='tab:blue')
 
@@ -442,6 +447,7 @@ def plot_results(dirstr):
     
     per_node_barplot('Node ID', 'Reputation', 'Reputation Distribution', dirstr+'/plots/RepDist.png')
 
+    all_node_plot(avgPIT, 'Time (sec)', 'Number of packets in transit', '', dirstr+'/plots/PIT.png')
     all_node_plot(avgOTA, 'Time (sec)', 'Max time in transit (sec)', '', dirstr+'/plots/MaxAge.png')
 
 if __name__ == "__main__":

@@ -19,8 +19,7 @@ elif REPDIST=='uniform':
     # Permissioned System rep system?
     REP = np.ones(NUM_NODES, dtype=int)
 # Modes: 0 = inactive, 1 = content, 2 = best-effort, 3 = malicious
-MODE = [2-NodeID%3 for NodeID in range(NUM_NODES)]
-MODE[3] = 3
+MODE = [1-NodeID%2 for NodeID in range(NUM_NODES)]
 IOT = np.zeros(NUM_NODES)
 IOTLOW = 0.5
 IOTHIGH = 1
@@ -38,7 +37,7 @@ P_B = 0.5
 MAX_BUFFER = 300
 GRAPH = 'regular'
 
-SCHEDULING = 'drr_lds'
+SCHEDULING = 'fifo'
 CONF_WEIGHT = 100
 
 DASH = False
@@ -46,3 +45,5 @@ UPDATE_INTERVAL = 10
 
 SELECT_TIPS = 'issue'
 TSC = 60
+
+PRUNING = True

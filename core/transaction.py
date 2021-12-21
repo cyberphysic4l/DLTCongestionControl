@@ -134,3 +134,11 @@ class SolRequest:
     '''
     def __init__(self, TranID):
         self.TranID = TranID
+
+class PruneRequest:
+    """
+    Request to prune issued by node "NodeID"
+    """
+    def __init__(self, NodeID, Forward=False):
+        self.NodeID = NodeID
+        self.Forward = Forward # flag to forward messages from this node or not
