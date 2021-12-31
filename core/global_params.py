@@ -37,7 +37,7 @@ P_B = 0.5
 MAX_BUFFER = 300
 GRAPH = 'regular'
 
-SCHEDULING = 'fifo'
+SCHEDULING = 'drr_lds'
 CONF_WEIGHT = 100
 
 DASH = False
@@ -46,4 +46,5 @@ UPDATE_INTERVAL = 10
 SELECT_TIPS = 'issue'
 TSC = 60
 
-PRUNING = True
+PRUNING = False
+REDUNDANCY = 2

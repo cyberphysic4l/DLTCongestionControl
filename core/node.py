@@ -159,8 +159,6 @@ class Node:
                 continue
             if Tran.NodeID in self.NeighbForward[i]:
                 self.Network.send_data(self, neighb, Tran, Time)
-            else:
-                print("not in forwarding list")
 
     def parse(self, Packet, Time):
         """
@@ -169,7 +167,7 @@ class Node:
         if Packet.Data.Index in self.Ledger: # return if this tranaction is already booked
             if PRUNING and Time>START_TIMES[self.NodeID]:
                 if Packet.TxNode in self.NeighbRx[Packet.Data.NodeID]: # if this node is still responsible for delivering this traffic
-                    if len(self.NeighbRx[Packet.Data.NodeID])>1: # if anyone else is responsible too, then remove this transmitting node
+                    if len(self.NeighbRx[Packet.Data.NodeID])>REDUNDANCY: # if more neighbours than required are responsible too, then remove this transmitting node
                         p = PruneRequest(Packet.Data.NodeID)
                         self.Network.send_data(self, Packet.TxNode, p, Time)
                         self.NeighbRx[Packet.Data.NodeID].remove(Packet.TxNode)
@@ -186,7 +184,6 @@ class Node:
         Tran = Packet.Data
         Tran.solidify(self)
         """
-                
         self.book(Packet, Time)
 
     def book(self, Packet, Time):

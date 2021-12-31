@@ -31,7 +31,7 @@ class Network:
                 self.Nodes[i].Neighbours.append(self.Nodes[j])
                 self.Nodes[i].NeighbForward.append([n for n in range(NUM_NODES)])
                 RowList.append(CommChannel(self.Nodes[i],self.Nodes[j],self.A[i][j]))
-            self.Nodes[i].NeighbRx = [self.Nodes[i].Neighbours for _ in range(NUM_NODES)]
+            self.Nodes[i].NeighbRx = [[n for n in self.Nodes[i].Neighbours] for _ in range(NUM_NODES)]
             self.CommChannels.append(RowList)
     
     def send_data(self, TxNode, RxNode, Data, Time):
@@ -112,7 +112,7 @@ class CommChannel:
             TranID = Packet.Data.TranID
             Tran = self.RxNode.Ledger[TranID]
             self.RxNode.Network.send_data(self.RxNode, self.TxNode, Tran, Time)
-        elif isinstance(Packet, tran.PruneRequest):
+        elif isinstance(Packet.Data, tran.PruneRequest):
             Packet.RxNode.prune(Packet.TxNode, Packet.Data.NodeID, Packet.Data.Forward)
         PacketIndex = self.Packets.index(Packet)
         self.Packets.remove(Packet)
