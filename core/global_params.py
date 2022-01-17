@@ -40,7 +40,7 @@ GRAPH = 'regular'
 SCHEDULING = 'drr_lds'
 CONF_WEIGHT = 100
 
-DASH = False
+DASH = True
 UPDATE_INTERVAL = 10
 
 SELECT_TIPS = 'issue'
