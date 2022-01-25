@@ -181,7 +181,7 @@ def plot_scheduler_comp(dir1, dir2):
     copyfile(dir2+'/aaconfig.txt', dirstr+'/config2.txt')
     plt.savefig(dirstr+'/LatencyComp.png', bbox_inches='tight')
 
-def per_node_barplot(xlabel: str, ylabel: str, title: str, dirstr: str, legend_loc: str = 'upper right'):
+def per_node_barplot(data, xlabel: str, ylabel: str, title: str, dirstr: str, legend_loc: str = 'upper right'):
     _, ax = plt.subplots(figsize=(8,4))
     ax.grid(linestyle='--')
     ax.set_xlabel(xlabel)
@@ -189,18 +189,18 @@ def per_node_barplot(xlabel: str, ylabel: str, title: str, dirstr: str, legend_l
     ax.set_ylabel(ylabel)
     for NodeID in range(NUM_NODES):
         if MODE[NodeID]==0:
-            ax.bar(NodeID, REP[NodeID], color='gray')
+            ax.bar(NodeID, data[NodeID], color='gray')
         if MODE[NodeID]==1:
-            ax.bar(NodeID, REP[NodeID], color='tab:blue')
+            ax.bar(NodeID, data[NodeID], color='tab:blue')
         if MODE[NodeID]==2:
-            ax.bar(NodeID, REP[NodeID], color='tab:red')
+            ax.bar(NodeID, data[NodeID], color='tab:red')
         if MODE[NodeID]==3:
-            ax.bar(NodeID, REP[NodeID], color='tab:green')
+            ax.bar(NodeID, data[NodeID], color='tab:green')
     ModeLines = [Line2D([0],[0],color='tab:red', lw=4), Line2D([0],[0],color='tab:blue', lw=4), Line2D([0],[0],color='gray', lw=4), Line2D([0],[0],color='tab:green', lw=4)]
     ax.legend(ModeLines, ['Best-effort', 'Content', 'Inactive', 'Malicious'], loc=legend_loc)
     plt.savefig(dirstr, bbox_inches='tight')
 
-def per_node_plot(data: np.ndarray, xlabel: str, ylabel: str, title: str, dirstr: str, avg_window: int = 2000, legend_loc: str = 'upper right', modes = None, step=STEP):
+def per_node_plot(data: np.ndarray, xlabel: str, ylabel: str, title: str, dirstr: str, avg_window: int = 2000, legend_loc: str = 'upper right', modes = None, step=STEP, figtxt = ''):
     fig, ax = plt.subplots(figsize=(8,4))
     ax.grid(linestyle='--')
     ax.set_xlabel(xlabel)
@@ -220,7 +220,9 @@ def per_node_plot(data: np.ndarray, xlabel: str, ylabel: str, title: str, dirstr
     if len(modes)>1:
         fig.legend(ModeLines, [mode_names[i] for i in modes], loc=legend_loc)
 
+    plt.figtext(0.5, 0.01, figtxt, wrap=True, horizontalalignment='center', fontsize=12)
     plt.savefig(dirstr, bbox_inches='tight')
+
 
 def per_node_plotly_plot(time, data: np.ndarray, xlabel: str, ylabel: str, title: str, avg_window: int = 2000, legend_loc: str = 'upper right', modes = None, step=STEP):
     fig = go.Figure()

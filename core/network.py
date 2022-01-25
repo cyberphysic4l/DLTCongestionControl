@@ -20,6 +20,7 @@ class Network:
         self.TranDelays = {}
         self.VisTranDelays = {}
         self.DissemTimes = {}
+        self.TranIssuer = {}
         Genesis = tran.Transaction(0, [], [], self)
         # Create nodes
         for i in range(np.size(self.A,1)):

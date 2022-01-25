@@ -12,6 +12,8 @@ class Node:
     def __init__(self, Network, NodeID, Genesis, PoWDelay = 1):
         g = Genesis.copy(self)
         self.TipsSet = [g]
+        self.NodeTipsSet = [[] for _ in range(NUM_NODES)]
+        self.NodeTipsSet[0].append(g)
         self.Ledger = {0: g}
         self.Neighbours = []
         self.NeighbForward = [] # list for each neighbour of NodeIDs to forward to this neighbour
@@ -86,9 +88,15 @@ class Node:
             if MODE[self.NodeID]==3: # malicious don't consider own txs for scheduling
                 self.schedule(self, Tran, Tran.IssueTime)
     
+    def remove_old_tips(self):
+        """
+        Removes old tips from the tips set
+        """
+        pass
+    
     def select_tips(self, Time):
         """
-        Implements uniform random tip selection with TSC fishing
+        Implements uniform random tip selection with/without fishing depending on param setting.
         """
         done = False
         while not done:
@@ -97,8 +105,9 @@ class Node:
                 ts = self.TipsSet
                 Selection = sample(ts, k=2)
                 for tip in Selection:
-                    if tip.IssueTime < Time - TSC:
+                    if FISHING and (tip.IssueTime < Time - TSC):
                         self.TipsSet.remove(tip)
+                        self.NodeTipsSet[tip.NodeID].remove(tip)
                         done = False
             else:
                 eligibleLedger = [tran for _,tran in self.Ledger.items() if tran.Eligible] 
@@ -245,7 +254,7 @@ class Node:
                     self.Lambda = self.Lambda*BETA
                     self.BackOff = False
                     self.LastBackOff = Time
-                else:
+                elif self.Lambda<2*self.LambdaD:
                     self.Lambda += self.Alpha
             elif MODE[self.NodeID]<3: #honest active
                 self.Lambda = NU*REP[self.NodeID]/sum(REP)

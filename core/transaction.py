@@ -12,7 +12,6 @@ class Transaction:
         self.Parents = Parents
         self.Network = Network
         self.Index = Network.TranIndex
-        Network.TranIndex += 1
         Network.InformedNodes[self.Index] = 0
         Network.ConfirmedNodes[self.Index] = 0
         self.Work = Work
@@ -24,12 +23,14 @@ class Transaction:
             self.Eligible = False
             self.Confirmed = False
             self.EligibleTime = None
+            Network.TranIssuer[Network.TranIndex] = Node.NodeID
         else: # genesis
             self.Solid = True
-            self.NodeID = []
+            self.NodeID = 0 # Genesis is issued by Node 0
             self.Eligible = True
             self.Confirmed = True
             self.EligibleTime = 0
+        Network.TranIndex += 1
 
     def mark_confirmed(self, Node):
         self.Confirmed = True
@@ -47,11 +48,13 @@ class Transaction:
                 break
         if isTip:
             Node.TipsSet.append(self)
+            Node.NodeTipsSet[self.NodeID].append(self)
         
         # remove parents from tip set
         for p in self.Parents:
             if p in Node.TipsSet:
                 Node.TipsSet.remove(p)
+                Node.NodeTipsSet[p.NodeID].remove(p)
             else:
                 continue
     

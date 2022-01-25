@@ -19,7 +19,6 @@ import dash
 import dash_core_components as dcc
 import dash_html_components as html
 from dash.dependencies import Input, Output, State
-import pandas as pd
 import webbrowser
 
 TimeSteps = int(SIM_TIME/STEP)
@@ -93,14 +92,14 @@ def update_line_chart(*args):
             Throughput[TimeSteps+i, NodeID] = Net.Throughput[NodeID]
             InboxLens[TimeSteps-n_steps+i,NodeID] = len(Net.Nodes[NodeID].Inbox.AllPackets)
             TipsSet[TimeSteps-n_steps+i,NodeID] = len(Net.Nodes[NodeID].TipsSet)
-            HonTipsSet[TimeSteps-n_steps+i,NodeID] = len([tip for tip in Net.Nodes[NodeID].TipsSet if tip.NodeID!=3])
+            HonTipsSet[TimeSteps-n_steps+i,NodeID] = sum([len(Net.Nodes[NodeID].NodeTipsSet[i]) for i in range(NUM_NODES) if MODE[i]<3])
     DissemRate = (Throughput[n_steps:]-Throughput[:-n_steps])/UPDATE_INTERVAL
     if tab == 'inbox-graph':
         fig_out = per_node_plotly_plot(T, InboxLens, 'Time', 'Inbox Length', 'Inbox Length Plot', avg_window=100)
     elif tab == 'tips-graph':
         fig_out = per_node_plotly_plot(T, TipsSet, 'Time', 'Number of Tips', 'Tip Set Plot', avg_window=100)
     elif tab == 'hontips-graph':
-        fig_out = per_node_plotly_plot(T, TipsSet, 'Time', 'Number of Tips', 'Tip Set Plot', avg_window=100)
+        fig_out = per_node_plotly_plot(T, TipsSet, 'Time', 'Number of Honest Tips', 'Tip Set Plot', avg_window=100)
     elif tab == 'dissem-graph':
         fig_out = per_node_plotly_plot(T, DissemRate, 'Time', 'Dissemination Rate', 'Dissemination Rate Plot', avg_window=100)
     lambdad = 'Total desired Lambda = ' + str(sum([Node.LambdaD for Node in Net.Nodes]))
@@ -139,6 +138,7 @@ def simulate():
     ReadyLens = [np.zeros((TimeSteps, NUM_NODES)) for mc in range(MONTE_CARLOS)]
     Dropped = [np.zeros((TimeSteps, NUM_NODES)) for mc in range(MONTE_CARLOS)]
     NumTips = [np.zeros((TimeSteps, NUM_NODES)) for mc in range(MONTE_CARLOS)]
+    HonTips = [np.zeros((TimeSteps, NUM_NODES)) for mc in range(MONTE_CARLOS)]
     InboxLens = [np.zeros((TimeSteps, NUM_NODES)) for mc in range(MONTE_CARLOS)]
     InboxLensMA = [np.zeros((TimeSteps, NUM_NODES)) for mc in range(MONTE_CARLOS)]
     Deficits = [np.zeros((TimeSteps, NUM_NODES)) for mc in range(MONTE_CARLOS)]
@@ -200,6 +200,7 @@ def simulate():
                 if sum([len(n.DroppedPackets[NodeID]) for n in Net.Nodes]):
                     Droppees[NodeID] = sum([len(n.DroppedPackets[NodeID]) for n in Net.Nodes])
                 NumTips[mc][i,NodeID] = len(Node.TipsSet)
+                HonTips[mc][i,NodeID] = sum([len(Node.NodeTipsSet[i]) for i in range(NUM_NODES) if MODE[i]<3])
                 #This measurement takes ages so left out unless needed.
                 #Unsolid[mc][i,NodeID] = len([tran for _,tran in Net.Nodes[NodeID].Ledger.items() if not tran.Solid])
                 InboxLensMA[mc][i,NodeID] = Node.Inbox.Avg
@@ -210,7 +211,7 @@ def simulate():
         print("Simulation: "+str(mc) +"\t 100% Complete")
         OldestTxAge.append(np.mean(OldestTxAges, axis=1))
         for i in range(SIM_TIME):
-            delays = [Net.TranDelays[j] for j in Net.TranDelays.keys() if int(Net.DissemTimes[j])==i]
+            delays = [Net.TranDelays[j] for j in Net.TranDelays if int(Net.DissemTimes[j])==i and MODE[Net.TranIssuer[j]]<3]
             if delays:
                 MeanDelay[mc][i] = sum(delays)/len(delays)
             visDelays = [Net.VisTranDelays[j] for j in Net.VisTranDelays.keys() if int(Net.DissemTimes[j])==i]
@@ -220,8 +221,8 @@ def simulate():
             for i in range(SIM_TIME):
                 delays = []
                 for _,tran in Net.Nodes[NodeID].Ledger.items():
-                    if tran.EligibleTime is not None:
-                        if int(tran.EligibleTime)==i:
+                    if tran.EligibleTime is not None and tran.NodeID:
+                        if int(tran.EligibleTime)==i and MODE[tran.NodeID]<3: # don't count malicious tran delays.
                             delays.append(tran.EligibleTime-tran.IssueTime)
                 if delays:
                     EligibleDelays[mc][i, NodeID] = sum(delays)/len(delays)
@@ -250,6 +251,7 @@ def simulate():
     avgReadyLen = sum(ReadyLens)/len(ReadyLens)
     avgDropped = sum(Dropped)/len(Dropped)
     avgNumTips = sum(NumTips)/len(NumTips)
+    avgHonTips = sum(HonTips)/len(HonTips)
     avgInboxLenMA = sum(InboxLensMA)/len(InboxLensMA)
     avgDefs = sum(Deficits)/len(Deficits)
     avgUndissem = sum(Undissem)/len(Undissem)
@@ -274,6 +276,7 @@ def simulate():
     np.savetxt(dirstr+'/raw/avgReadyLen.csv', avgReadyLen, delimiter=',')
     np.savetxt(dirstr+'/raw/avgDropped.csv', avgDropped, delimiter=',')
     np.savetxt(dirstr+'/raw/avgNumTips.csv', avgNumTips, delimiter=',')
+    np.savetxt(dirstr+'/raw/avgHonTips.csv', avgHonTips, delimiter=',')
     np.savetxt(dirstr+'/raw/avgInboxLenMA.csv', avgInboxLenMA, delimiter=',')
     np.savetxt(dirstr+'/raw/avgDefs.csv', avgDefs, delimiter=',')
     np.savetxt(dirstr+'/raw/avgUndissem.csv', avgUndissem, delimiter=',')
@@ -313,6 +316,7 @@ def plot_results(dirstr):
     avgReadyLen = np.loadtxt(dirstr+'/raw/avgReadyLen.csv', delimiter=',')
     avgDropped = np.loadtxt(dirstr+'/raw/avgDropped.csv', delimiter=',')
     avgNumTips = np.loadtxt(dirstr+'/raw/avgNumTips.csv', delimiter=',')
+    avgHonTips = np.loadtxt(dirstr+'/raw/avgHonTips.csv', delimiter=',')
     avgUnsolid = np.loadtxt(dirstr+'/raw/avgUnsolid.csv', delimiter=',')
     avgEligibleDelays = np.loadtxt(dirstr+'/raw/avgEligibleDelays.csv', delimiter=',')
     avgInboxLenMA = np.loadtxt(dirstr+'/raw/avgInboxLenMA.csv', delimiter=',')
@@ -384,7 +388,9 @@ def plot_results(dirstr):
     fig2, ax2 = plt.subplots(figsize=(8,4))
     ax2.grid(linestyle='--')
     ax2.set_xlabel('Time (sec)')
-    ax2.plot(np.arange(10, SIM_TIME, STEP), 100*np.sum(avgTP[1000:,:], axis=1)/NU, color = 'black')
+    HonestTP = sum(avgTP[1000:,NodeID] for NodeID in range(NUM_NODES) if MODE[NodeID]<3)
+    MaxHonestTP = NU*sum([rep for i,rep in enumerate(REP) if MODE[i]<3])/sum(REP)
+    ax2.plot(np.arange(10, SIM_TIME, STEP), 100*HonestTP/MaxHonestTP, color = 'black')
     ax22 = ax2.twinx()
     ax22.plot(np.arange(0, SIM_TIME, 1), avgMeanDelay, color='tab:gray')    
     ax2.tick_params(axis='y', labelcolor='black')
@@ -409,7 +415,8 @@ def plot_results(dirstr):
     per_node_plot(avgInboxLen-avgReadyLen, 'Time (sec)', 'Not Ready length', '', dirstr+'/plots/AvgNonReadyLen.png', avg_window=100)
 
     per_node_plot(avgNumTips, 'Time (sec)', 'Number of Tips', '', dirstr+'/plots/AvgNumTips.png')
-    per_node_plot(avgEligibleDelays, 'Time (sec)', 'Eligible Delays', '', dirstr+'/plots/AvgEligibleDelays.png', avg_window=20, step=1)
+    per_node_plot(avgHonTips, 'Time (sec)', 'Number of Honest Tips', '', dirstr+'/plots/AvgHonTips.png')
+    per_node_plot(avgEligibleDelays, 'Time (sec)', 'Age of Messages Becoming Eligible', '', dirstr+'/plots/AvgEligibleDelays.png', avg_window=20, step=1)
     per_node_plot(avgUnsolid, 'Time (sec)', 'Unsolid', '', dirstr+'/plots/AvgUnsolid.png')
     """
     fig5a, ax5a = plt.subplots(figsize=(8,4))
