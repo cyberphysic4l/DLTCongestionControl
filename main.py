@@ -452,7 +452,8 @@ def plot_results(dirstr):
     plt.savefig(dirstr+'/plots/InboxLenMA.png', bbox_inches='tight')
     """
     
-    per_node_barplot('Node ID', 'Reputation', 'Reputation Distribution', dirstr+'/plots/RepDist.png')
+    per_node_barplot(REP, 'Node ID', 'Reputation', 'Reputation Distribution', dirstr+'/plots/RepDist.png')
+    per_node_barplot(QUANTUM, 'Node ID', 'Quantum', 'Quantum Distribution', dirstr+'/plots/QDist.png')
 
     all_node_plot(avgPIT, 'Time (sec)', 'Number of packets in transit', '', dirstr+'/plots/PIT.png')
     all_node_plot(avgOTA, 'Time (sec)', 'Max time in transit (sec)', '', dirstr+'/plots/MaxAge.png')
