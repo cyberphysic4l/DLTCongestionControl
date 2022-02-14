@@ -49,6 +49,9 @@ def plot_cdf(data, xlabel: str, dirstr: str,  xlim=0):
             if MODE[NodeID]==3:
                 mal = True
                 Lines[NodeID] = ax.plot(bins, cdf, color='tab:green', linewidth=4*REP[NodeID]/REP[0], marker=marker, markevery=0.1)
+            if MODE[NodeID]==4:
+                mal = True
+                Lines[NodeID] = ax.plot(bins, cdf, color='tab:olive', linewidth=4*REP[NodeID]/REP[0], marker=marker, markevery=0.1)
     if mal:
         ModeLines = [Line2D([0],[0],color='tab:red', lw=4), Line2D([0],[0],color='tab:blue', lw=4), Line2D([0],[0],color='tab:green', lw=4)]
         ax.legend(ModeLines, ['Best-effort', 'Content','Malicious'], loc='lower right')
@@ -181,23 +184,21 @@ def plot_scheduler_comp(dir1, dir2):
     copyfile(dir2+'/aaconfig.txt', dirstr+'/config2.txt')
     plt.savefig(dirstr+'/LatencyComp.png', bbox_inches='tight')
 
-def per_node_barplot(data, xlabel: str, ylabel: str, title: str, dirstr: str, legend_loc: str = 'upper right'):
-    _, ax = plt.subplots(figsize=(8,4))
+def per_node_barplot(data, xlabel: str, ylabel: str, title: str, dirstr: str, legend_loc: str = 'upper right', modes=None):
+    fig, ax = plt.subplots(figsize=(8,4))
     ax.grid(linestyle='--')
     ax.set_xlabel(xlabel)
     ax.title.set_text(title)
     ax.set_ylabel(ylabel)
+    if modes is None:
+        modes = list(set(MODE))
+    mode_names = ['Inactive', 'Content','Best-effort', 'Malicious', 'Multi-rate']
+    colors = ['tab:gray', 'tab:blue', 'tab:red', 'tab:green', 'tab:olive']
     for NodeID in range(NUM_NODES):
-        if MODE[NodeID]==0:
-            ax.bar(NodeID, data[NodeID], color='gray')
-        if MODE[NodeID]==1:
-            ax.bar(NodeID, data[NodeID], color='tab:blue')
-        if MODE[NodeID]==2:
-            ax.bar(NodeID, data[NodeID], color='tab:red')
-        if MODE[NodeID]==3:
-            ax.bar(NodeID, data[NodeID], color='tab:green')
-    ModeLines = [Line2D([0],[0],color='tab:red', lw=4), Line2D([0],[0],color='tab:blue', lw=4), Line2D([0],[0],color='gray', lw=4), Line2D([0],[0],color='tab:green', lw=4)]
-    ax.legend(ModeLines, ['Best-effort', 'Content', 'Inactive', 'Malicious'], loc=legend_loc)
+        ax.bar(NodeID, data[NodeID], color=colors[MODE[NodeID]])
+    ModeLines = [Line2D([0],[0],color=colors[mode], lw=4) for mode in modes]
+    if len(modes)>1:
+        fig.legend(ModeLines, [mode_names[i] for i in modes], loc=legend_loc)
     plt.savefig(dirstr, bbox_inches='tight')
 
 def per_node_plot(data: np.ndarray, xlabel: str, ylabel: str, title: str, dirstr: str, avg_window: int = 2000, legend_loc: str = 'upper right', modes = None, step=STEP, figtxt = ''):
@@ -209,8 +210,8 @@ def per_node_plot(data: np.ndarray, xlabel: str, ylabel: str, title: str, dirstr
 
     if modes is None:
         modes = list(set(MODE))
-    mode_names = ['Inactive', 'Content','Best-effort', 'Malicious']
-    colors = ['tab:gray', 'tab:blue', 'tab:red', 'tab:green']
+    mode_names = ['Inactive', 'Content','Best-effort', 'Malicious', 'Multi-rate']
+    colors = ['tab:gray', 'tab:blue', 'tab:red', 'tab:green', 'tab:olive']
     for NodeID in range(NUM_NODES):
         if MODE[NodeID] in modes and np.any(data[:, NodeID]):
             ax.plot(np.arange((avg_window-1)*step, SIM_TIME, step), np.convolve(np.ones(avg_window)/avg_window, data[:,NodeID], 'valid'), color=colors[MODE[NodeID]])
@@ -233,15 +234,13 @@ def per_node_plotly_plot(time, data: np.ndarray, xlabel: str, ylabel: str, title
                    yaxis_range=[0, 1.1*max_val])
     if modes is None:
         modes = list(set(MODE))
-    mode_names = ['Inactive', 'Content','Best-effort', 'Malicious']
     colors = ['gray', 'blue', 'red', 'green']
     for NodeID in range(NUM_NODES):
-        if MODE[NodeID] in modes and np.any(data[:, NodeID]):
+        if np.any(data[:, NodeID]):
             fig.add_trace(go.Scatter(x=np.arange((avg_window-1)*step-SIM_TIME+time, time, step),
                                      y=np.convolve(np.ones(avg_window)/avg_window, data[:,NodeID], 'valid'),
                                      mode='lines',
-                                     name="Node " + str(NodeID),
-                                     line=dict(color=colors[MODE[NodeID]])))
+                                     name="Node " + str(NodeID+1)))
     
     """ModeLines = [Line2D([0],[0],color=colors[mode], lw=4) for mode in modes]
     if len(modes)>1:

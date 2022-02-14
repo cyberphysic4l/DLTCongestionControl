@@ -23,7 +23,12 @@ class Node:
         self.NodeID = NodeID
         self.Alpha = ALPHA*REP[NodeID]/sum(REP)
         self.Lambda = NU*REP[NodeID]/sum(REP)
-        self.LambdaD = MODE[NodeID]*NU*REP[NodeID]/sum(REP)
+        if MODE[NodeID]==0:
+            self.LambdaD = 0
+        elif MODE[NodeID]==1:
+            self.LambdaD = self.Lambda
+        else:
+            self.LambdaD = 5*self.Lambda # higher than it will be allowed
         self.BackOff = []
         self.LastBackOff = []
         self.LastScheduleTime = 0
@@ -85,7 +90,7 @@ class Node:
             p = net.Packet(self, self, Tran, Tran.IssueTime)
             p.EndTime = Tran.IssueTime
             self.solidify(p, Tran.IssueTime) # solidify then book this transaction
-            if MODE[self.NodeID]==3: # malicious don't consider own txs for scheduling
+            if MODE[self.NodeID]>=3: # malicious don't consider own txs for scheduling
                 self.schedule(self, Tran, Tran.IssueTime)
     
     def remove_old_tips(self):
@@ -163,11 +168,19 @@ class Node:
         self.forward(TxNode, Tran, Time)
 
     def forward(self, TxNode, Tran, Time):
-        for i, neighb in enumerate(self.Neighbours):
-            if neighb == TxNode:
-                continue
-            if Tran.NodeID in self.NeighbForward[i]:
-                self.Network.send_data(self, neighb, Tran, Time)
+        """
+        By default, nodes forward to all neighbours except the one they received the TX from.
+        Multirate attackers select one nighbour at random to forward their own transactions to.
+        """
+        if self.NodeID==Tran.NodeID and MODE[self.NodeID]==4: # multirate attacker
+            i = np.random.randint(NUM_NEIGHBOURS)
+            self.Network.send_data(self, self.Neighbours[i], Tran, Time)
+        else: # normal nodes
+            for i, neighb in enumerate(self.Neighbours):
+                if neighb == TxNode:
+                    continue
+                if Tran.NodeID in self.NeighbForward[i]:
+                    self.Network.send_data(self, neighb, Tran, Time)
 
     def parse(self, Packet, Time):
         """
@@ -223,7 +236,7 @@ class Node:
             self.Undissem += 1
             self.UndissemWork += Tran.Work
             Tran.VisibleTime = Time
-            if MODE[self.NodeID]==3:
+            if MODE[self.NodeID]>=3:
                 return # don't enqueue own transactions if malicious
 
         self.enqueue(Packet, Time)
@@ -254,12 +267,12 @@ class Node:
                     self.Lambda = self.Lambda*BETA
                     self.BackOff = False
                     self.LastBackOff = Time
-                elif self.Lambda<2*self.LambdaD:
+                else:
                     self.Lambda += self.Alpha
             elif MODE[self.NodeID]<3: #honest active
                 self.Lambda = NU*REP[self.NodeID]/sum(REP)
             else: # malicious
-                self.Lambda = 3*NU*REP[self.NodeID]/sum(REP)
+                self.Lambda = 5*NU*REP[self.NodeID]/sum(REP)
             
     def enqueue(self, Packet, Time):
         """

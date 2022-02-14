@@ -27,6 +27,7 @@ InboxLens = np.zeros((int(SIM_TIME/STEP), NUM_NODES))
 TipsSet = np.zeros((int(SIM_TIME/STEP), NUM_NODES))
 HonTipsSet = np.zeros((int(SIM_TIME/STEP), NUM_NODES))
 Throughput = np.zeros((int((SIM_TIME+UPDATE_INTERVAL)/STEP), NUM_NODES))
+RepThroughput = np.zeros((int((SIM_TIME+UPDATE_INTERVAL)/STEP), NUM_NODES))
 DissemRate = np.zeros((int(SIM_TIME/STEP), NUM_NODES))
 fig = per_node_plotly_plot(0, InboxLens, 'Time', 'Inbox Length', 'Inbox Length Plot', avg_window=100)
 if GRAPH=='regular':
@@ -45,11 +46,12 @@ T = 0
 app = dash.Dash(__name__)
 
 app.layout = html.Div([
-    dcc.Tabs(id="tabs-graph", value='inbox-graph', children=[
+    dcc.Tabs(id="tabs-graph", value='dissem-graph', children=[
+        dcc.Tab(label='Dissemination Rate', value='dissem-graph'),
+        dcc.Tab(label='Reputation-scaled Dissemination Rate', value='rep-dissem-graph'),
         dcc.Tab(label='Inbox Lengths', value='inbox-graph'),
         dcc.Tab(label='Number of Tips', value='tips-graph'),
-        dcc.Tab(label='Number of Honest Tips', value='hontips-graph'),
-        dcc.Tab(label='Dissemination Rate', value='dissem-graph')
+        dcc.Tab(label='Number of Honest Tips', value='hontips-graph')
     ]),
     html.Button('Start/Stop', id='startstop', n_clicks=0),
     dcc.Graph(id='output-state', figure=fig),
@@ -57,11 +59,10 @@ app.layout = html.Div([
     html.H2("Set Desired Issue Rates"),
     html.Div([
         html.Div([
-            "Node " + str(NodeID) + "\t",
-            dcc.Input(id='range' + str(NodeID), type='number', min=0, max=NU, step=0.1, value=int(10*Net.Nodes[NodeID].LambdaD)/10.0)
+            "Node " + str(NodeID+1) + "\t",
+            dcc.Input(id='range' + str(NodeID), type='number', min=0, max=200, step=0.1, value=int(1000*Net.Nodes[NodeID].LambdaD/NU)/10.0)
         ]) for NodeID in range(NUM_NODES)]+
-        [html.Div(id = 'lambdad', children = 'Total desired Lambda = ' + str(sum([Node.LambdaD for Node in Net.Nodes]))),
-        html.Div(id = 'nu', children = 'Scheduler rate = ' + str (NU))]
+        [html.Div(id = 'lambdad', children = 'Total desired Lambda = ' + str(100*sum([Node.LambdaD for Node in Net.Nodes])/NU) + '%')]
     )
 ])    
 
@@ -73,7 +74,7 @@ app.layout = html.Div([
               [State('range' + str(NodeID), 'value') for NodeID in range(NUM_NODES)])
 def update_line_chart(*args):
     # discrete time step size specified by global variable STEP
-    global T, DissemRate, InboxLens, TipsSet, HonTipsSet, Throughput
+    global T, DissemRate, InboxLens, TipsSet, HonTipsSet, Throughput, RepThroughput
     n_updates = args[0]
     tab = args[1]
     n_updates_out = n_updates + 1
@@ -81,19 +82,22 @@ def update_line_chart(*args):
     TipsSet[:-n_steps] = TipsSet[n_steps:]
     HonTipsSet[:-n_steps] = HonTipsSet[n_steps:]
     Throughput[:-n_steps] = Throughput[n_steps:]
+    RepThroughput[:-n_steps] = RepThroughput[n_steps:]
     for i in range(n_steps):
         T = T + STEP
         Net.simulate(T)
         for NodeID in range(NUM_NODES):
             if args[NodeID+2] is not None:
-                if Net.Nodes[NodeID].LambdaD != args[NodeID+2]:
-                    Net.Nodes[NodeID].LambdaD = args[NodeID+2]
+                if 100*Net.Nodes[NodeID].LambdaD/NU != args[NodeID+2]:
+                    Net.Nodes[NodeID].LambdaD = NU*args[NodeID+2]/100
                     Net.Nodes[NodeID].TranPool = []
             Throughput[TimeSteps+i, NodeID] = Net.Throughput[NodeID]
+            RepThroughput[TimeSteps+i, NodeID] = Net.Throughput[NodeID]*sum(REP)/REP[NodeID]
             InboxLens[TimeSteps-n_steps+i,NodeID] = len(Net.Nodes[NodeID].Inbox.AllPackets)
             TipsSet[TimeSteps-n_steps+i,NodeID] = len(Net.Nodes[NodeID].TipsSet)
             HonTipsSet[TimeSteps-n_steps+i,NodeID] = sum([len(Net.Nodes[NodeID].NodeTipsSet[i]) for i in range(NUM_NODES) if MODE[i]<3])
-    DissemRate = (Throughput[n_steps:]-Throughput[:-n_steps])/UPDATE_INTERVAL
+    DissemRate = (Throughput[n_steps:]-Throughput[:-n_steps])/NU*UPDATE_INTERVAL
+    RepDissemRate = (RepThroughput[n_steps:]-RepThroughput[:-n_steps])/NU*UPDATE_INTERVAL
     if tab == 'inbox-graph':
         fig_out = per_node_plotly_plot(T, InboxLens, 'Time', 'Inbox Length', 'Inbox Length Plot', avg_window=100)
     elif tab == 'tips-graph':
@@ -101,8 +105,10 @@ def update_line_chart(*args):
     elif tab == 'hontips-graph':
         fig_out = per_node_plotly_plot(T, TipsSet, 'Time', 'Number of Honest Tips', 'Tip Set Plot', avg_window=100)
     elif tab == 'dissem-graph':
-        fig_out = per_node_plotly_plot(T, DissemRate, 'Time', 'Dissemination Rate', 'Dissemination Rate Plot', avg_window=100)
-    lambdad = 'Total desired Lambda = ' + str(sum([Node.LambdaD for Node in Net.Nodes]))
+        fig_out = per_node_plotly_plot(T, DissemRate, 'Time', 'Rate (%)', 'Dissemination Rate Plot', avg_window=100)
+    elif tab == 'rep-dissem-graph':
+        fig_out = per_node_plotly_plot(T, RepDissemRate, 'Time', 'Rate', 'Repuatation-scaled Dissemination Rate (moving average)', avg_window=10000)
+    lambdad = 'Total desired Lambda = ' + str(100*sum([Node.LambdaD for Node in Net.Nodes])/NU) + '%'
 
     return fig_out, n_updates_out, lambdad
 
@@ -188,7 +194,7 @@ def simulate():
             # save summary results in output arrays
             PacketsInTransit[mc][i] = sum([sum([len(cc.Packets) for cc in ccs]) for ccs in Net.CommChannels])
             for NodeID, Node in enumerate(Net.Nodes):
-                Lmds[mc][i, NodeID] = Node.Lambda
+                Lmds[mc][i, NodeID] = min(Node.Lambda, Node.LambdaD)
                 if Node.Inbox.AllPackets and MODE[NodeID]<3: #don't include malicious nodes
                     HonestPackets = [p for p in Node.Inbox.AllPackets if MODE[p.Data.NodeID]<3]
                     if HonestPackets:
@@ -358,31 +364,24 @@ def plot_results(dirstr):
     ax1[1].set_ylabel(r'$D_i / {\~{\lambda}_i}$')
     mal = False
     iot = False
+    modes = list(set(MODE))
+    mode_names = ['Inactive', 'Content','Best-effort', 'Malicious', 'Multi-rate']
+    colors = ['tab:gray', 'tab:blue', 'tab:red', 'tab:green', 'tab:olive']
     for NodeID in range(NUM_NODES):
         if IOT[NodeID]:
             iot = True
             marker = 'x'
         else:
             marker = None
-        if MODE[NodeID]==1:
-            ax1[0].plot(np.arange(10, SIM_TIME, STEP), avgTP[1000:,NodeID], linewidth=5*REP[NodeID]/REP[0], color='tab:blue', marker=marker, markevery=0.1)
-            ax1[1].plot(np.arange(10, SIM_TIME, STEP), avgTP[1000:,NodeID]*sum(REP)/(NU*REP[NodeID]), linewidth=5*REP[NodeID]/REP[0], color='tab:blue', marker=marker, markevery=0.1)
-        if MODE[NodeID]==2:
-            ax1[0].plot(np.arange(10, SIM_TIME, STEP), avgTP[1000:,NodeID], linewidth=5*REP[NodeID]/REP[0], color='tab:red', marker=marker, markevery=0.1)
-            ax1[1].plot(np.arange(10, SIM_TIME, STEP), avgTP[1000:,NodeID]*sum(REP)/(NU*REP[NodeID]), linewidth=5*REP[NodeID]/REP[0], color='tab:red', marker=marker, markevery=0.1)
-        if MODE[NodeID]==3:
-            ax1[0].plot(np.arange(10, SIM_TIME, STEP), avgTP[1000:,NodeID], linewidth=5*REP[NodeID]/REP[0], color='tab:green', marker=marker, markevery=0.1)
-            ax1[1].plot(np.arange(10, SIM_TIME, STEP), avgTP[1000:,NodeID]*sum(REP)/(NU*REP[NodeID]), linewidth=5*REP[NodeID]/REP[0], color='tab:green', marker=marker, markevery=0.1)
-            mal = True
-    if mal:
-        ModeLines = [Line2D([0],[0],color='tab:blue', lw=4), Line2D([0],[0],color='tab:red', lw=4), Line2D([0],[0],color='tab:green', lw=4)]
-        fig1.legend(ModeLines, ['Content','Best-effort', 'Malicious'], loc='right')
-    elif iot:
+        ax1[0].plot(np.arange(10, SIM_TIME, STEP), avgTP[1000:,NodeID], linewidth=5*REP[NodeID]/REP[0], color=colors[MODE[NodeID]], marker=marker, markevery=0.1)
+        ax1[1].plot(np.arange(10, SIM_TIME, STEP), avgTP[1000:,NodeID]*sum(REP)/(NU*REP[NodeID]), linewidth=5*REP[NodeID]/REP[0], color=colors[MODE[NodeID]], marker=marker, markevery=0.1)
+
+    if iot:
         ModeLines = [Line2D([0],[0],color='tab:blue'), Line2D([0],[0],color='tab:red'), Line2D([0],[0],color='tab:blue', marker='x'), Line2D([0],[0],color='tab:red', marker='x')]
         fig1.legend(ModeLines, ['Content value node','Best-effort value node', 'Content IoT node', 'Best-effort IoT node'], loc='right')
-    else:
-        ModeLines = [Line2D([0],[0],color='tab:blue', lw=4), Line2D([0],[0],color='tab:red', lw=4)]
-        fig1.legend(ModeLines, ['Content','Best-effort'], loc='right')
+    elif len(modes)>1:
+        ModeLines = [Line2D([0],[0],color=colors[mode], lw=4) for mode in modes]
+        fig.legend(ModeLines, [mode_names[i] for i in modes], loc='right')
     plt.savefig(dirstr+'/plots/Rates.png', bbox_inches='tight')
     
     fig2, ax2 = plt.subplots(figsize=(8,4))
@@ -407,7 +406,7 @@ def plot_results(dirstr):
     
     #ax4.plot(np.arange(0, SIM_TIME, STEP), np.sum(avgLmds, axis=1), color='tab:blue')
 
-    per_node_plot(avgLmds, 'Time (sec)', r'$\lambda_i$', '', dirstr+'/plots/IssueRates.png', avg_window=1, modes=[1,2])
+    per_node_plot(avgLmds, 'Time (sec)', r'$\lambda_i$', '', dirstr+'/plots/IssueRates.png', avg_window=1)
     
     per_node_plot(avgInboxLen, 'Time (sec)', 'Inbox length', '', dirstr+'/plots/AvgInboxLen.png', avg_window=100)
     per_node_plot(avgReadyLen, 'Time (sec)', 'Ready length', '', dirstr+'/plots/AvgReadyLen.png', avg_window=100)

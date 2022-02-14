@@ -2,11 +2,11 @@ import numpy as np
 
 # Simulation Parameters
 MONTE_CARLOS = 1
-SIM_TIME = 500
+SIM_TIME = 300
 STEP = 0.01
 # Network Parameters
 NU = 10
-NUM_NODES = 20
+NUM_NODES = 10
 NUM_NEIGHBOURS = 4
 START_TIMES = 10*np.ones(NUM_NODES)
 REPDIST = 'zipf'
@@ -18,9 +18,10 @@ if REPDIST=='zipf':
 elif REPDIST=='uniform':
     # Permissioned System rep system?
     REP = np.ones(NUM_NODES, dtype=int)
+
 # Modes: 0 = inactive, 1 = content, 2 = best-effort, 3 = malicious
-MODE = [6-NodeID%4 for NodeID in range(NUM_NODES)]
-#MODE[2] = 3
+MODE = [1-(NodeID)%2 for NodeID in range(NUM_NODES)]
+#MODE[2] = 4
 IOT = np.zeros(NUM_NODES)
 IOTLOW = 0.5
 IOTHIGH = 1
@@ -37,16 +38,18 @@ W_Q = 0.1
 P_B = 0.5
 MAX_BUFFER = 300
 GRAPH = 'regular'
-
 SCHEDULING = 'drr_lds'
 CONF_WEIGHT = 100
 
-DASH = False
+# Dash visualisation
+DASH = True
 UPDATE_INTERVAL = 10
 
+# Tip selection
 SELECT_TIPS = 'issue'
 TSC = 60
 FISHING = True
 
+# Gossip optimisation
 PRUNING = False
 REDUNDANCY = 2
