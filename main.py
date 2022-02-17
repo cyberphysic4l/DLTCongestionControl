@@ -57,7 +57,7 @@ app.layout = html.Div([
     dcc.Graph(id='output-state', figure=fig),
     html.Div(id='updates', children=0),
     html.H2("Set Desired Issue Rates"),
-    html.Div([
+    html.Div(className="rates-wrapper", children=[
         html.Div([
             "Node " + str(NodeID+1) + "\t",
             dcc.Input(id='range' + str(NodeID), type='number', min=0, max=200, step=0.1, value=int(1000*Net.Nodes[NodeID].LambdaD/NU)/10.0)

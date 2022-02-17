@@ -1,0 +1,40 @@
+@import url("https://rsms.me/inter/inter.css");
+
+* {
+  font-family: "Inter", sans-serif;
+}
+
+#tabs-graph .tab {
+  border: none !important;
+  border-bottom: 1px solid #d9e1ef !important;
+  background: none !important;
+  padding: 10px !important;
+  display: flex !important;
+  align-items: flex-end !important;
+  justify-content: center !important;
+}
+
+#tabs-graph .tab.tab--selected {
+  border-bottom: 4px solid pink !important;
+}
+
+.rates-wrapper {
+    display: flex;
+    flex-wrap: wrap;
+}
+
+.rates-wrapper > div{
+    flex-direction: row;
+    display: flex;
+    flex-wrap: wrap;
+    margin: 20px 30px 0px 0px;
+}
+
+.rates-wrapper > div input {
+    margin-left: 5px;
+    margin-bottom: 1rem;
+    border-style: solid;
+    background-color: transparent;
+    padding: 5px 4px;
+    border: 1px solid #d9e1ef;
+}
