@@ -5,8 +5,8 @@ MONTE_CARLOS = 1
 SIM_TIME = 300
 STEP = 0.01
 # Network Parameters
-NU = 10
-NUM_NODES = 10
+NU = 20
+NUM_NODES = 20
 NUM_NEIGHBOURS = 4
 START_TIMES = 10*np.ones(NUM_NODES)
 REPDIST = 'zipf'
@@ -20,8 +20,10 @@ elif REPDIST=='uniform':
     REP = np.ones(NUM_NODES, dtype=int)
 
 # Modes: 0 = inactive, 1 = content, 2 = best-effort, 3 = malicious
-MODE = [1-(NodeID)%2 for NodeID in range(NUM_NODES)]
-#MODE[2] = 4
+#MODE = [3-(NodeID+1)%4 for NodeID in range(NUM_NODES)] # multiple malicious
+MODE = [2-(NodeID)%3 for NodeID in range(NUM_NODES)] # All honest
+#MODE = [1 for _ in range(NUM_NODES)] # All content (95%)
+MODE[2] = 3 # Make node 2 malicious
 IOT = np.zeros(NUM_NODES)
 IOTLOW = 0.5
 IOTHIGH = 1
@@ -31,7 +33,7 @@ MAX_WORK = 1
 ALPHA = 0.075
 BETA = 0.7
 TAU = 2
-MIN_TH = 2
+MIN_TH = 1
 MAX_TH = MIN_TH
 QUANTUM = [MAX_WORK*rep/sum(REP) for rep in REP]
 W_Q = 0.1
@@ -42,13 +44,11 @@ SCHEDULING = 'drr_lds'
 CONF_WEIGHT = 100
 
 # Dash visualisation
-DASH = True
+DASH = False
 UPDATE_INTERVAL = 10
 
 # Tip selection
-SELECT_TIPS = 'issue'
-TSC = 60
-FISHING = True
+L_MAX = 300
 
 # Gossip optimisation
 PRUNING = False

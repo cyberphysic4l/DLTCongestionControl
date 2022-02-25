@@ -90,7 +90,7 @@ def update_line_chart(*args):
             if args[NodeID+2] is not None:
                 if 100*Net.Nodes[NodeID].LambdaD/NU != args[NodeID+2]:
                     Net.Nodes[NodeID].LambdaD = NU*args[NodeID+2]/100
-                    Net.Nodes[NodeID].TranPool = []
+                    Net.Nodes[NodeID].MsgPool = []
             Throughput[TimeSteps+i, NodeID] = Net.Throughput[NodeID]
             RepThroughput[TimeSteps+i, NodeID] = Net.Throughput[NodeID]*sum(REP)/REP[NodeID]
             InboxLens[TimeSteps-n_steps+i,NodeID] = len(Net.Nodes[NodeID].Inbox.AllPackets)
@@ -208,7 +208,7 @@ def simulate():
                 NumTips[mc][i,NodeID] = len(Node.TipsSet)
                 HonTips[mc][i,NodeID] = sum([len(Node.NodeTipsSet[i]) for i in range(NUM_NODES) if MODE[i]<3])
                 #This measurement takes ages so left out unless needed.
-                #Unsolid[mc][i,NodeID] = len([tran for _,tran in Net.Nodes[NodeID].Ledger.items() if not tran.Solid])
+                #Unsolid[mc][i,NodeID] = len([msg for _,msg in Net.Nodes[NodeID].Ledger.items() if not msg.Solid])
                 InboxLensMA[mc][i,NodeID] = Node.Inbox.Avg
                 Deficits[mc][i, NodeID] = Net.Nodes[0].Inbox.Deficit[NodeID]
                 Throughput[mc][i, NodeID] = Net.Throughput[NodeID]
@@ -217,19 +217,19 @@ def simulate():
         print("Simulation: "+str(mc) +"\t 100% Complete")
         OldestTxAge.append(np.mean(OldestTxAges, axis=1))
         for i in range(SIM_TIME):
-            delays = [Net.TranDelays[j] for j in Net.TranDelays if int(Net.DissemTimes[j])==i and MODE[Net.TranIssuer[j]]<3]
+            delays = [Net.MsgDelays[j] for j in Net.MsgDelays if int(Net.DissemTimes[j])==i and MODE[Net.MsgIssuer[j]]<3]
             if delays:
                 MeanDelay[mc][i] = sum(delays)/len(delays)
-            visDelays = [Net.VisTranDelays[j] for j in Net.VisTranDelays.keys() if int(Net.DissemTimes[j])==i]
+            visDelays = [Net.VisMsgDelays[j] for j in Net.VisMsgDelays.keys() if int(Net.DissemTimes[j])==i]
             if visDelays:
                 MeanVisDelay[mc][i] = sum(visDelays)/len(visDelays)
         for NodeID in range(NUM_NODES):
             for i in range(SIM_TIME):
                 delays = []
-                for _,tran in Net.Nodes[NodeID].Ledger.items():
-                    if tran.EligibleTime is not None and tran.NodeID:
-                        if int(tran.EligibleTime)==i and MODE[tran.NodeID]<3: # don't count malicious tran delays.
-                            delays.append(tran.EligibleTime-tran.IssueTime)
+                for _,msg in Net.Nodes[NodeID].Ledger.items():
+                    if msg.EligibleTime is not None and msg.NodeID:
+                        if int(msg.EligibleTime)==i and MODE[msg.NodeID]<3: # don't count malicious msg delays.
+                            delays.append(msg.EligibleTime-msg.IssueTime)
                 if delays:
                     EligibleDelays[mc][i, NodeID] = sum(delays)/len(delays)
                 
@@ -239,7 +239,7 @@ def simulate():
             interArrTimes[NodeID].extend(np.diff(ArrTimes[NodeID])/ArrWorks[1:])
             inboxLatencies[NodeID].extend(Net.Nodes[NodeID].InboxLatencies)
                 
-        latencies, latTimes = Net.tran_latency(latencies, latTimes)
+        latencies, latTimes = Net.msg_latency(latencies, latTimes)
         
         TP.append(np.concatenate((np.zeros((1000, NUM_NODES)),(Throughput[mc][1000:,:]-Throughput[mc][:-1000,:])))/10)
         WTP.append(np.concatenate((np.zeros((1000, NUM_NODES)),(WorkThroughput[mc][1000:,:]-WorkThroughput[mc][:-1000,:])))/10)
@@ -381,7 +381,7 @@ def plot_results(dirstr):
         fig1.legend(ModeLines, ['Content value node','Best-effort value node', 'Content IoT node', 'Best-effort IoT node'], loc='right')
     elif len(modes)>1:
         ModeLines = [Line2D([0],[0],color=colors[mode], lw=4) for mode in modes]
-        fig.legend(ModeLines, [mode_names[i] for i in modes], loc='right')
+        fig1.legend(ModeLines, [mode_names[i] for i in modes], loc='right')
     plt.savefig(dirstr+'/plots/Rates.png', bbox_inches='tight')
     
     fig2, ax2 = plt.subplots(figsize=(8,4))
@@ -402,7 +402,7 @@ def plot_results(dirstr):
     plt.savefig(dirstr+'/plots/Throughput.png', bbox_inches='tight')
     
 
-    #plot_cdf(latencies, 'Latency (sec)', dirstr+'/plots/Latency.png')
+    plot_cdf(latencies, 'Latency (sec)', dirstr+'/plots/Latency.png')
     
     #ax4.plot(np.arange(0, SIM_TIME, STEP), np.sum(avgLmds, axis=1), color='tab:blue')
 
@@ -410,7 +410,7 @@ def plot_results(dirstr):
     
     per_node_plot(avgInboxLen, 'Time (sec)', 'Inbox length', '', dirstr+'/plots/AvgInboxLen.png', avg_window=100)
     per_node_plot(avgReadyLen, 'Time (sec)', 'Ready length', '', dirstr+'/plots/AvgReadyLen.png', avg_window=100)
-    per_node_plot(avgDropped, 'Time (sec)', 'Dropped Transactions', '', dirstr+'/plots/AvgDropped.png', avg_window=100)
+    per_node_plot(avgDropped, 'Time (sec)', 'Dropped Messages', '', dirstr+'/plots/AvgDropped.png', avg_window=100)
     per_node_plot(avgInboxLen-avgReadyLen, 'Time (sec)', 'Not Ready length', '', dirstr+'/plots/AvgNonReadyLen.png', avg_window=100)
 
     per_node_plot(avgNumTips, 'Time (sec)', 'Number of Tips', '', dirstr+'/plots/AvgNumTips.png')

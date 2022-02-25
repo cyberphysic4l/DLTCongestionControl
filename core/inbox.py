@@ -1,5 +1,5 @@
 from .global_params import *
-from . import transaction as tran
+from . import message as msg
 import numpy as np
 
 class Inbox:
@@ -12,52 +12,52 @@ class Inbox:
         self.ReadyPackets = []
         self.Packets = [[] for NodeID in range(NUM_NODES)] # Inbox_m(i)
         self.Work = np.zeros(NUM_NODES)
-        self.TranIDs = []
+        self.MsgIDs = []
         self.RRNodeID = np.random.randint(NUM_NODES) # start at a random node
         self.Deficit = np.zeros(NUM_NODES)
         self.Scheduled = []
         self.Avg = 0
-        self.RequestedTranIDs = []
+        self.RequestedMsgIDs = []
 
-    def update_ready(self, Tran: tran.Transaction):
-        if Tran.Index in self.TranIDs:
-            packetList = [p for p in self.AllPackets if p.Data.Index==Tran.Index]
+    def update_ready(self, Msg: msg.Message):
+        if Msg.Index in self.MsgIDs:
+            packetList = [p for p in self.AllPackets if p.Data.Index==Msg.Index]
             assert len(packetList)==1
             Packet = packetList[0]
         else:
             return
-        if Packet not in self.ReadyPackets and Tran.is_ready():
+        if Packet not in self.ReadyPackets and Msg.is_ready():
             self.ReadyPackets.append(Packet)
     
     def add_packet(self, Packet):
-        Tran = Packet.Data
-        assert isinstance(Tran, tran.Transaction)
-        NodeID = Tran.NodeID
-        if Tran.Index in self.RequestedTranIDs:
+        Msg = Packet.Data
+        assert isinstance(Msg, msg.Message)
+        NodeID = Msg.NodeID
+        if Msg.Index in self.RequestedMsgIDs:
             if self.Packets[NodeID]:
                 Packet.EndTime = self.Packets[NodeID][0].EndTime # move packet to the front of the queue
-            self.RequestedTranIDs = [tranID for tranID in self.RequestedTranIDs if tranID != Tran.Index]
+            self.RequestedMsgIDs = [msgID for msgID in self.RequestedMsgIDs if msgID != Msg.Index]
             self.Packets[NodeID].insert(0,Packet)
         else:
             self.Packets[NodeID].append(Packet)
         self.AllPackets.append(Packet)
         # check if eligible
-        if Tran.is_ready():
+        if Msg.is_ready():
             self.ReadyPackets.append(Packet)
-        self.TranIDs.append(Tran.Index)
+        self.MsgIDs.append(Msg.Index)
         self.Work[NodeID] += Packet.Data.Work
        
     def remove_packet(self, Packet):
         """
         Remove from Inbox and filtered inbox etc
         """
-        if self.TranIDs:
+        if self.MsgIDs:
             if Packet in self.AllPackets:
                 self.AllPackets.remove(Packet)
                 if Packet in self.ReadyPackets:
                     self.ReadyPackets.remove(Packet)
                 self.Packets[Packet.Data.NodeID].remove(Packet)
-                self.TranIDs.remove(Packet.Data.Index)  
+                self.MsgIDs.remove(Packet.Data.Index)  
                 self.Work[Packet.Data.NodeID] -= Packet.Data.Work
     
     def drr_lds_schedule(self, Time):
@@ -84,7 +84,7 @@ class Inbox:
                 Work = Packet.Data.Work
                 if self.Deficit[self.RRNodeID]>=Work and Packet.EndTime<=Time:
                     self.Deficit[self.RRNodeID] -= Work
-                    # remove the transaction from all inboxes
+                    # remove the message from all inboxes
                     self.remove_packet(Packet)
                     self.Scheduled.append(Packet)
                 else:
@@ -97,6 +97,6 @@ class Inbox:
     def fifo_schedule(self, Time):
         if self.AllPackets:
             Packet = self.AllPackets[0]
-            # remove the transaction from all inboxes
+            # remove the message from all inboxes
             self.remove_packet(Packet)
             return Packet

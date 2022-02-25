@@ -201,7 +201,7 @@ def per_node_barplot(data, xlabel: str, ylabel: str, title: str, dirstr: str, le
         fig.legend(ModeLines, [mode_names[i] for i in modes], loc=legend_loc)
     plt.savefig(dirstr, bbox_inches='tight')
 
-def per_node_plot(data: np.ndarray, xlabel: str, ylabel: str, title: str, dirstr: str, avg_window: int = 2000, legend_loc: str = 'upper right', modes = None, step=STEP, figtxt = ''):
+def per_node_plot(data: np.ndarray, xlabel: str, ylabel: str, title: str, dirstr: str, avg_window: int = 100, legend_loc: str = 'upper right', modes = None, step=STEP, figtxt = ''):
     fig, ax = plt.subplots(figsize=(8,4))
     ax.grid(linestyle='--')
     ax.set_xlabel(xlabel)

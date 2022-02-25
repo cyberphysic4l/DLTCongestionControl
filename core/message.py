@@ -1,7 +1,7 @@
 from .global_params import *
 from copy import copy
 
-class Transaction:
+class Message:
     """
     Object to simulate a transaction and its edges in the DAG
     """
@@ -11,7 +11,7 @@ class Transaction:
         self.Children = []
         self.Parents = Parents
         self.Network = Network
-        self.Index = Network.TranIndex
+        self.Index = Network.MsgIndex
         Network.InformedNodes[self.Index] = 0
         Network.ConfirmedNodes[self.Index] = 0
         self.Work = Work
@@ -23,45 +23,23 @@ class Transaction:
             self.Eligible = False
             self.Confirmed = False
             self.EligibleTime = None
-            Network.TranIssuer[Network.TranIndex] = Node.NodeID
+            Network.MsgIssuer[Network.MsgIndex] = Node.NodeID
         else: # genesis
             self.Solid = True
             self.NodeID = 0 # Genesis is issued by Node 0
             self.Eligible = True
             self.Confirmed = True
             self.EligibleTime = 0
-        Network.TranIndex += 1
+        Network.MsgIndex += 1
 
     def mark_confirmed(self, Node):
         self.Confirmed = True
         self.Network.ConfirmedNodes[self.Index] +=1
-
-    def mark_eligible(self, Node):
-        # mark this transaction as eligible and modify the tipset accordingly
-        self.Eligible = True
-        # add this to tipset if no eligible children
-        isTip = True
-        for c in self.Children:
-            Node.Inbox.update_ready(c)
-            if c.Eligible:
-                isTip = False
-                break
-        if isTip:
-            Node.TipsSet.append(self)
-            Node.NodeTipsSet[self.NodeID].append(self)
-        
-        # remove parents from tip set
-        for p in self.Parents:
-            if p in Node.TipsSet:
-                Node.TipsSet.remove(p)
-                Node.NodeTipsSet[p.NodeID].remove(p)
-            else:
-                continue
     
-    def updateAW(self, Node, updateTran=None, Work=None):
-        if updateTran is None:
+    def updateAW(self, Node, updateMsg=None, Work=None):
+        if updateMsg is None:
             assert Work is None
-            updateTran = self
+            updateMsg = self
             Work = self.Work
         else:
             assert Work is not None
@@ -69,38 +47,38 @@ class Transaction:
             if self.AWeight >= CONF_WEIGHT:
                 self.mark_confirmed(Node)
 
-        self.LastAWUpdate = updateTran
+        self.LastAWUpdate = updateMsg
         for p in self.Parents:
-            if not p.Confirmed and p.LastAWUpdate != updateTran:
-                p.updateAW(Node, updateTran, Work)
+            if not p.Confirmed and p.LastAWUpdate != updateMsg:
+                p.updateAW(Node, updateMsg, Work)
     
     def copy(self, Node):
-        Tran = copy(self)
-        parentIDs = [p.Index for p in Tran.Parents]
+        Msg = copy(self)
+        parentIDs = [p.Index for p in Msg.Parents]
         parents = []
         for pID in parentIDs:
             # if we have the parents in the ledger already, include them as parents
             if pID in Node.Ledger:
                 parents.append(Node.Ledger[pID])
-        Tran.Parents = parents
-        childrenIDs = [c.Index for c in Tran.Children]
+        Msg.Parents = parents
+        childrenIDs = [c.Index for c in Msg.Children]
         children = []
         for cID in childrenIDs:
             # if children are in our ledger already, then include them (needed for solidification)
             if cID in Node.Ledger:
                 children.append(Node.Ledger[cID])
-        Tran.Children = children
+        Msg.Children = children
         if self.Index == 0:
-            Tran.Eligible = True
-            Tran.EligibleTime = 0
-            Tran.Confirmed = True
-            Tran.Solid = True
+            Msg.Eligible = True
+            Msg.EligibleTime = 0
+            Msg.Confirmed = True
+            Msg.Solid = True
         else:
-            Tran.Eligible = False
-            Tran.EligibleTime = None
-            Tran.Confirmed = False
-            Tran.Solid = False
-        return Tran
+            Msg.Eligible = False
+            Msg.EligibleTime = None
+            Msg.Confirmed = False
+            Msg.Solid = False
+        return Msg
 
     def solidify(self, Node = None):
         if len(self.Parents)>2:
@@ -114,7 +92,7 @@ class Transaction:
         if self.Solid:
             # if we already have some children of this solid transaction, they will possibly need to be solidified too.
             for c in self.Children:
-                assert isinstance(c, Transaction)
+                assert isinstance(c, Message)
                 if self not in c.Parents:
                     if len(c.Parents)==2:
                         print("3rd parent being added...")
@@ -135,8 +113,8 @@ class SolRequest:
     '''
     Object to request solidification of a transaction
     '''
-    def __init__(self, TranID):
-        self.TranID = TranID
+    def __init__(self, MsgID):
+        self.MsgID = MsgID
 
 class PruneRequest:
     """

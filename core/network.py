@@ -1,5 +1,5 @@
 from .global_params import *
-from . import transaction as tran
+from . import message as msg
 from . import node
 import numpy as np
 
@@ -10,18 +10,18 @@ class Network:
     """
     def __init__(self, AdjMatrix):
         self.A = AdjMatrix
-        self.TranIndex = 0
+        self.MsgIndex = 0
         self.InformedNodes = {}
         self.ConfirmedNodes = {}
         self.Nodes = []
         self.CommChannels = []
         self.Throughput = [0 for NodeID in range(NUM_NODES)]
         self.WorkThroughput = [0 for NodeID in range(NUM_NODES)]
-        self.TranDelays = {}
-        self.VisTranDelays = {}
+        self.MsgDelays = {}
+        self.VisMsgDelays = {}
         self.DissemTimes = {}
-        self.TranIssuer = {}
-        Genesis = tran.Transaction(0, [], [], self)
+        self.MsgIssuer = {}
+        Genesis = msg.Message(0, [], [], self)
         # Create nodes
         for i in range(np.size(self.A,1)):
             self.Nodes.append(node.Node(self, i, Genesis))
@@ -44,7 +44,7 @@ class Network:
         
     def simulate(self, Time):
         """
-        Each node generate new transactions
+        Each node generate new messages
         """
         for Node in self.Nodes:
             Node.issue_txs(Time)
@@ -55,16 +55,16 @@ class Network:
             for cc in ccs:
                 cc.transmit_packets(Time+STEP)
         """
-        Each node schedule transactions in inbox
+        Each node schedules messages in inbox
         """
         for Node in self.Nodes:
             Node.schedule_txs(Time)
     
-    def tran_latency(self, latencies, latTimes):
-        for i,Tran in self.Nodes[0].Ledger.items():
-            if i in self.DissemTimes and Tran.IssueTime>20:
-                latencies[Tran.NodeID].append(self.DissemTimes[i]-Tran.IssueTime)
-                latTimes[Tran.NodeID].append(self.DissemTimes[i])
+    def msg_latency(self, latencies, latTimes):
+        for i,Msg in self.Nodes[0].Ledger.items():
+            if i in self.DissemTimes and Msg.IssueTime>20:
+                latencies[Msg.NodeID].append(self.DissemTimes[i]-Msg.IssueTime)
+                latTimes[Msg.NodeID].append(self.DissemTimes[i])
         return latencies, latTimes
 
 class CommChannel:
@@ -105,15 +105,15 @@ class CommChannel:
         When packet has arrived at receiving node, process it
         """
         Packet.EndTime = Time
-        if isinstance(Packet.Data, tran.Transaction):
-            # if this is a transaction, add the Packet to Inbox
+        if isinstance(Packet.Data, msg.Message):
+            # if this is a message, add the Packet to Inbox
             self.RxNode.parse(Packet, Time)
-        elif isinstance(Packet.Data, tran.SolRequest):
-            # else if this is a solidification request, retrieve the transaction and send it back
-            TranID = Packet.Data.TranID
-            Tran = self.RxNode.Ledger[TranID]
-            self.RxNode.Network.send_data(self.RxNode, self.TxNode, Tran, Time)
-        elif isinstance(Packet.Data, tran.PruneRequest):
+        elif isinstance(Packet.Data, msg.SolRequest):
+            # else if this is a solidification request, retrieve the message and send it back
+            MsgID = Packet.Data.MsgID
+            Msg = self.RxNode.Ledger[MsgID]
+            self.RxNode.Network.send_data(self.RxNode, self.TxNode, Msg, Time)
+        elif isinstance(Packet.Data, msg.PruneRequest):
             Packet.RxNode.prune(Packet.TxNode, Packet.Data.NodeID, Packet.Data.Forward)
         PacketIndex = self.Packets.index(Packet)
         self.Packets.remove(Packet)

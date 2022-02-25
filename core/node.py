@@ -1,6 +1,6 @@
 from .global_params import *
 from .inbox import Inbox
-from .transaction import PruneRequest, Transaction
+from .message import PruneRequest, Message
 from . import network as net
 import numpy as np
 from random import sample
@@ -26,7 +26,7 @@ class Node:
         if MODE[NodeID]==0:
             self.LambdaD = 0
         elif MODE[NodeID]==1:
-            self.LambdaD = self.Lambda
+            self.LambdaD = 0.95*self.Lambda
         else:
             self.LambdaD = 5*self.Lambda # higher than it will be allowed
         self.BackOff = []
@@ -35,7 +35,7 @@ class Node:
         self.LastScheduleWork = 0
         self.LastIssueTime = 0
         self.LastIssueWork = 0
-        self.IssuedTrans = []
+        self.IssuedMsgs = []
         self.Undissem = 0
         self.UndissemWork = 0
         self.ServiceTimes = []
@@ -43,7 +43,7 @@ class Node:
         self.ArrivalWorks = []
         self.InboxLatencies = []
         self.DroppedPackets = [[] for NodeID in range(NUM_NODES)]
-        self.TranPool = []
+        self.MsgPool = []
         
     def issue_txs(self, Time):
         """
@@ -57,24 +57,21 @@ class Node:
             times = np.sort(np.random.uniform(Time, Time+STEP, np.random.poisson(STEP*self.LambdaD/Work)))
             for t in times:
                 Parents = []
-                self.TranPool.append(Transaction(t, Parents, self, self.Network, Work=Work))
+                self.MsgPool.append(Message(t, Parents, self, self.Network, Work=Work))
 
         if MODE[self.NodeID]<3:
             if self.BackOff:
                 self.LastIssueTime += TAU#BETA*REP[self.NodeID]/self.Lambda
-            while Time+STEP >= self.LastIssueTime + self.LastIssueWork/self.Lambda and self.TranPool:
-                OldestTranTime = self.TranPool[0].IssueTime
-                if OldestTranTime>Time+STEP:
+            while Time+STEP >= self.LastIssueTime + self.LastIssueWork/self.Lambda and self.MsgPool:
+                OldestMsgTime = self.MsgPool[0].IssueTime
+                if OldestMsgTime>Time+STEP:
                     break
-                self.LastIssueTime = max(OldestTranTime, self.LastIssueTime+self.LastIssueWork/self.Lambda)
-                Tran = self.TranPool.pop(0)
-                if SELECT_TIPS=='issue':
-                    Tran.Parents = self.select_tips(Time)
-                else:
-                    Tran.Parents = []
-                Tran.IssueTime = self.LastIssueTime
-                self.LastIssueWork = Tran.Work
-                self.IssuedTrans.append(Tran)
+                self.LastIssueTime = max(OldestMsgTime, self.LastIssueTime+self.LastIssueWork/self.Lambda)
+                Msg = self.MsgPool.pop(0)
+                Msg.Parents = self.select_tips(Time)
+                Msg.IssueTime = self.LastIssueTime
+                self.LastIssueWork = Msg.Work
+                self.IssuedMsgs.append(Msg)
 
         else:
             Work = 1
@@ -82,22 +79,30 @@ class Node:
             for t in times:
                 Parents = self.select_tips(Time)
                 #Work = np.random.uniform(AVG_WORK[self.NodeID]-0.5, AVG_WORK[self.NodeID]+0.5)
-                self.IssuedTrans.append(Transaction(t, Parents, self, self.Network, Work=Work))
+                self.IssuedMsgs.append(Message(t, Parents, self, self.Network, Work=Work))
                 
         # check PoW completion
-        while self.IssuedTrans:
-            Tran = self.IssuedTrans.pop(0)
-            p = net.Packet(self, self, Tran, Tran.IssueTime)
-            p.EndTime = Tran.IssueTime
-            self.solidify(p, Tran.IssueTime) # solidify then book this transaction
+        while self.IssuedMsgs:
+            Msg = self.IssuedMsgs.pop(0)
+            p = net.Packet(self, self, Msg, Msg.IssueTime)
+            p.EndTime = Msg.IssueTime
+            self.solidify(p, Msg.IssueTime) # solidify then book this message
             if MODE[self.NodeID]>=3: # malicious don't consider own txs for scheduling
-                self.schedule(self, Tran, Tran.IssueTime)
+                self.schedule(self, Msg, Msg.IssueTime)
     
-    def remove_old_tips(self):
+    def add_tip(self, tip):
         """
-        Removes old tips from the tips set
+        Adds tip to the tips set
         """
-        pass
+        self.TipsSet.append(tip)
+        self.NodeTipsSet[tip.NodeID].append(tip)
+    
+    def remove_tip(self, tip):
+        """
+        Removes tip from the tips set
+        """
+        self.TipsSet.remove(tip)
+        self.NodeTipsSet[tip.NodeID].remove(tip)
     
     def select_tips(self, Time):
         """
@@ -109,13 +114,8 @@ class Node:
             if len(self.TipsSet)>1:
                 ts = self.TipsSet
                 Selection = sample(ts, k=2)
-                for tip in Selection:
-                    if FISHING and (tip.IssueTime < Time - TSC):
-                        self.TipsSet.remove(tip)
-                        self.NodeTipsSet[tip.NodeID].remove(tip)
-                        done = False
             else:
-                eligibleLedger = [tran for _,tran in self.Ledger.items() if tran.Eligible] 
+                eligibleLedger = [msg for _,msg in self.Ledger.items() if msg.Eligible] 
                 if len(eligibleLedger)>1:
                     Selection = sample(eligibleLedger, k=2)
                 else:
@@ -158,29 +158,62 @@ class Node:
                     break
             else:
                 break
-    
-    def schedule(self, TxNode, Tran: Transaction, Time):
-        # add to eligible set
-        assert not Tran.Eligible
-        Tran.mark_eligible(self)
-        Tran.EligibleTime = Time
-        # broadcast the packet
-        self.forward(TxNode, Tran, Time)
 
-    def forward(self, TxNode, Tran, Time):
+    def update_tipsset(self, Msg):
+        """
+        Tip set manager
+        """
+        is_malicious = (MODE[self.NodeID]>=3 and Msg.NodeID==self.NodeID)
+        
+        # add to tip set if no eligible children
+        isTip = True
+        for c in Msg.Children:
+            self.Inbox.update_ready(c)
+            if c.Eligible:
+                isTip = False
+                break
+        if isTip:
+            self.add_tip(Msg)
+
+        # if this is a malicious nodes own message, then don't remove the tips it selected as parents
+        if MODE[self.NodeID]>=3 and Msg.NodeID==self.NodeID:
+            pass
+        else:
+            # remove parents from tip set
+            for p in Msg.Parents:
+                if p in self.TipsSet:
+                    self.remove_tip(p)
+                else:
+                    continue
+
+        # check tip set size and remove oldest if too large. Malicious nodes don't prune tip set
+        if len(self.TipsSet)>L_MAX:# and MODE[self.NodeID]<3:
+            oldestTip = min(self.TipsSet, key = lambda tip:tip.IssueTime)
+            self.remove_tip(oldestTip)
+    
+    def schedule(self, TxNode, Msg: Message, Time):
+        # add to eligible set
+        assert not Msg.Eligible
+        Msg.Eligible = True
+        self.update_tipsset(Msg)
+        Msg.EligibleTime = Time
+        # broadcast the packet
+        self.forward(TxNode, Msg, Time)
+
+    def forward(self, TxNode, Msg, Time):
         """
         By default, nodes forward to all neighbours except the one they received the TX from.
-        Multirate attackers select one nighbour at random to forward their own transactions to.
+        Multirate attackers select one nighbour at random to forward their own messages to.
         """
-        if self.NodeID==Tran.NodeID and MODE[self.NodeID]==4: # multirate attacker
+        if self.NodeID==Msg.NodeID and MODE[self.NodeID]==4: # multirate attacker
             i = np.random.randint(NUM_NEIGHBOURS)
-            self.Network.send_data(self, self.Neighbours[i], Tran, Time)
+            self.Network.send_data(self, self.Neighbours[i], Msg, Time)
         else: # normal nodes
             for i, neighb in enumerate(self.Neighbours):
                 if neighb == TxNode:
                     continue
-                if Tran.NodeID in self.NeighbForward[i]:
-                    self.Network.send_data(self, neighb, Tran, Time)
+                if Msg.NodeID in self.NeighbForward[i]:
+                    self.Network.send_data(self, neighb, Msg, Time)
 
     def parse(self, Packet, Time):
         """
@@ -195,49 +228,49 @@ class Node:
                         self.NeighbRx[Packet.Data.NodeID].remove(Packet.TxNode)
             return
         Packet.Data = Packet.Data.copy(self)
-        Tran = Packet.Data
-        assert isinstance(Tran, Transaction)
+        Msg = Packet.Data
+        assert isinstance(Msg, Message)
         self.solidify(Packet, Time)
 
     def solidify(self, Packet, Time):
         """
         Not implemented yet, just calls the booker
 
-        Tran = Packet.Data
-        Tran.solidify(self)
+        Msg = Packet.Data
+        Msg.solidify(self)
         """
         self.book(Packet, Time)
 
     def book(self, Packet, Time):
         """
-        Adds the transaction to the local copy of the ledger
+        Adds the message to the local copy of the ledger
         """
-        # make a shallow copy of the transaction and initialise metadata
-        Tran = Packet.Data
-        assert isinstance(Tran, Transaction)
-        assert Tran.Index not in self.Ledger
-        self.Ledger[Tran.Index] = Tran
-        for p in Tran.Parents:
-            p.Children.append(Tran)
-        Tran.updateAW(self)
+        # make a shallow copy of the message and initialise metadata
+        Msg = Packet.Data
+        assert isinstance(Msg, Message)
+        assert Msg.Index not in self.Ledger
+        self.Ledger[Msg.Index] = Msg
+        for p in Msg.Parents:
+            p.Children.append(Msg)
+        Msg.updateAW(self)
         
         
         # mark this TX as received by this node
-        self.Network.InformedNodes[Tran.Index] += 1
-        if self.Network.InformedNodes[Tran.Index]==NUM_NODES:
-            self.Network.Throughput[Tran.NodeID] += 1
-            self.Network.WorkThroughput[Tran.NodeID] += Tran.Work
-            self.Network.TranDelays[Tran.Index] = Time-Tran.IssueTime
-            self.Network.VisTranDelays[Tran.Index] = Time-Tran.VisibleTime
-            self.Network.DissemTimes[Tran.Index] = Time
-            self.Network.Nodes[Tran.NodeID].Undissem -= 1
-            self.Network.Nodes[Tran.NodeID].UndissemWork -= Tran.Work
-        if Tran.NodeID==self.NodeID:
+        self.Network.InformedNodes[Msg.Index] += 1
+        if self.Network.InformedNodes[Msg.Index]==NUM_NODES:
+            self.Network.Throughput[Msg.NodeID] += 1
+            self.Network.WorkThroughput[Msg.NodeID] += Msg.Work
+            self.Network.MsgDelays[Msg.Index] = Time-Msg.IssueTime
+            self.Network.VisMsgDelays[Msg.Index] = Time-Msg.VisibleTime
+            self.Network.DissemTimes[Msg.Index] = Time
+            self.Network.Nodes[Msg.NodeID].Undissem -= 1
+            self.Network.Nodes[Msg.NodeID].UndissemWork -= Msg.Work
+        if Msg.NodeID==self.NodeID:
             self.Undissem += 1
-            self.UndissemWork += Tran.Work
-            Tran.VisibleTime = Time
+            self.UndissemWork += Msg.Work
+            Msg.VisibleTime = Time
             if MODE[self.NodeID]>=3:
-                return # don't enqueue own transactions if malicious
+                return # don't enqueue own messages if malicious
 
         self.enqueue(Packet, Time)
     
@@ -278,7 +311,7 @@ class Node:
         """
         Add to inbox if not already in inbox or already eligible
         """
-        if Packet.Data not in self.Inbox.TranIDs:
+        if Packet.Data not in self.Inbox.MsgIDs:
             if not Packet.Data.Eligible:
                 self.Inbox.add_packet(Packet)
                 self.ArrivalWorks.append(Packet.Data.Work)
