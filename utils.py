@@ -49,9 +49,6 @@ def plot_cdf(data, xlabel: str, dirstr: str,  xlim=0):
             if MODE[NodeID]==3:
                 mal = True
                 Lines[NodeID] = ax.plot(bins, cdf, color='tab:green', linewidth=4*REP[NodeID]/REP[0], marker=marker, markevery=0.1)
-            if MODE[NodeID]==4:
-                mal = True
-                Lines[NodeID] = ax.plot(bins, cdf, color='tab:olive', linewidth=4*REP[NodeID]/REP[0], marker=marker, markevery=0.1)
     if mal:
         ModeLines = [Line2D([0],[0],color='tab:red', lw=4), Line2D([0],[0],color='tab:blue', lw=4), Line2D([0],[0],color='tab:green', lw=4)]
         ax.legend(ModeLines, ['Best-effort', 'Content','Malicious'], loc='lower right')

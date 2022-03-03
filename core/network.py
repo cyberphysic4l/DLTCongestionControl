@@ -47,7 +47,7 @@ class Network:
         Each node generate new messages
         """
         for Node in self.Nodes:
-            Node.issue_txs(Time)
+            Node.issue_msgs(Time)
         """
         Move packets through all comm channels
         """
@@ -58,7 +58,7 @@ class Network:
         Each node schedules messages in inbox
         """
         for Node in self.Nodes:
-            Node.schedule_txs(Time)
+            Node.schedule_msgs(Time)
     
     def msg_latency(self, latencies, latTimes):
         for i,Msg in self.Nodes[0].Ledger.items():

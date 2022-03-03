@@ -44,10 +44,15 @@ class Node:
         self.InboxLatencies = []
         self.DroppedPackets = [[] for NodeID in range(NUM_NODES)]
         self.MsgPool = []
+        self.LastMilestoneTime = 0
+        self.UnconfMsgs = {}
+        self.ConfMsgs = {}
+        self.SolBuffer = {}
+        self.MissingParentIDs = {}
         
-    def issue_txs(self, Time):
+    def issue_msgs(self, Time):
         """
-        Create new TXs at rate lambda and do PoW
+        Create new msgs at rate lambda
         """
         if self.LambdaD:
             if IOT[self.NodeID]:
@@ -56,7 +61,7 @@ class Node:
                 Work = 1
             times = np.sort(np.random.uniform(Time, Time+STEP, np.random.poisson(STEP*self.LambdaD/Work)))
             for t in times:
-                Parents = []
+                Parents = {}
                 self.MsgPool.append(Message(t, Parents, self, self.Network, Work=Work))
 
         if MODE[self.NodeID]<3:
@@ -72,22 +77,24 @@ class Node:
                 Msg.IssueTime = self.LastIssueTime
                 self.LastIssueWork = Msg.Work
                 self.IssuedMsgs.append(Msg)
-
         else:
             Work = 1
             times = np.sort(np.random.uniform(Time, Time+STEP, np.random.poisson(STEP*self.Lambda/Work)))
             for t in times:
                 Parents = self.select_tips(Time)
-                #Work = np.random.uniform(AVG_WORK[self.NodeID]-0.5, AVG_WORK[self.NodeID]+0.5)
                 self.IssuedMsgs.append(Message(t, Parents, self, self.Network, Work=Work))
                 
-        # check PoW completion
+        # Issue the messages
         while self.IssuedMsgs:
             Msg = self.IssuedMsgs.pop(0)
             p = net.Packet(self, self, Msg, Msg.IssueTime)
             p.EndTime = Msg.IssueTime
+            if self.NodeID==COO and Msg.IssueTime>=self.LastMilestoneTime+MILESTONE_PERIOD:
+                Msg.Milestone = True
+                self.LastMilestoneTime += MILESTONE_PERIOD
+            self.UnconfMsgs[Msg.Index] = Msg
             self.solidify(p, Msg.IssueTime) # solidify then book this message
-            if MODE[self.NodeID]>=3: # malicious don't consider own txs for scheduling
+            if MODE[self.NodeID]==3: # malicious don't consider own msgs for scheduling
                 self.schedule(self, Msg, Msg.IssueTime)
     
     def add_tip(self, tip):
@@ -120,11 +127,12 @@ class Node:
                     Selection = sample(eligibleLedger, k=2)
                 else:
                     Selection = eligibleLedger # genesis
-        return Selection
+        assert len(Selection)==2 or Selection[0].Index==0
+        return {s.Index: s for s in Selection}
     
-    def schedule_txs(self, Time):
+    def schedule_msgs(self, Time):
         """
-        schedule txs from inbox at a fixed deterministic rate NU
+        schedule msgs from inbox at a fixed deterministic rate NU
         """
         # sort inboxes by arrival time
         self.Inbox.AllPackets.sort(key=lambda p: p.EndTime)
@@ -175,25 +183,30 @@ class Node:
         if isTip:
             self.add_tip(Msg)
 
-        # if this is a malicious nodes own message, then don't remove the tips it selected as parents
-        if MODE[self.NodeID]>=3 and Msg.NodeID==self.NodeID:
+        # if this is a malicious nodes own message and ATK_TIP_RM_PARENTS is False, then don't remove the tips it selected as parents
+        if MODE[self.NodeID]>=3 and Msg.NodeID==self.NodeID and not ATK_TIP_RM_PARENTS:
             pass
         else:
             # remove parents from tip set
-            for p in Msg.Parents:
+            for _,p in Msg.Parents.items():
                 if p in self.TipsSet:
                     self.remove_tip(p)
                 else:
                     continue
 
-        # check tip set size and remove oldest if too large. Malicious nodes don't prune tip set
-        if len(self.TipsSet)>L_MAX:# and MODE[self.NodeID]<3:
+        # check tip set size and remove oldest if too large. Malicious nodes don't prune tip set if ATK_MAX_SIZE is False.
+        if len(self.TipsSet)>L_MAX and not (MODE[self.NodeID]==3 and not ATK_TIP_MAX_SIZE):
             oldestTip = min(self.TipsSet, key = lambda tip:tip.IssueTime)
             self.remove_tip(oldestTip)
     
     def schedule(self, TxNode, Msg: Message, Time):
         # add to eligible set
         assert not Msg.Eligible
+        if CONF_TYPE=='CW':
+            Msg.updateCW()
+        # if message is a milestone, mark its past cone as confirmed
+        if CONF_TYPE=='Coo' and Msg.Milestone:
+            Msg.mark_confirmed()
         Msg.Eligible = True
         self.update_tipsset(Msg)
         Msg.EligibleTime = Time
@@ -205,7 +218,7 @@ class Node:
         By default, nodes forward to all neighbours except the one they received the TX from.
         Multirate attackers select one nighbour at random to forward their own messages to.
         """
-        if self.NodeID==Msg.NodeID and MODE[self.NodeID]==4: # multirate attacker
+        if self.NodeID==Msg.NodeID and MODE[self.NodeID]==3 and ATK_RAND_FORWARD: # multirate attacker
             i = np.random.randint(NUM_NEIGHBOURS)
             self.Network.send_data(self, self.Neighbours[i], Msg, Time)
         else: # normal nodes
@@ -219,7 +232,7 @@ class Node:
         """
         Not fully implemented yet
         """
-        if Packet.Data.Index in self.Ledger: # return if this tranaction is already booked
+        if Packet.Data.Index in self.Ledger or Packet.Data.Index in self.SolBuffer: # return if this tranaction is already booked or in solidification buffer
             if PRUNING and Time>START_TIMES[self.NodeID]:
                 if Packet.TxNode in self.NeighbRx[Packet.Data.NodeID]: # if this node is still responsible for delivering this traffic
                     if len(self.NeighbRx[Packet.Data.NodeID])>REDUNDANCY: # if more neighbours than required are responsible too, then remove this transmitting node
@@ -227,6 +240,8 @@ class Node:
                         self.Network.send_data(self, Packet.TxNode, p, Time)
                         self.NeighbRx[Packet.Data.NodeID].remove(Packet.TxNode)
             return
+
+        # make a shallow copy of the message and initialise metadata
         Packet.Data = Packet.Data.copy(self)
         Msg = Packet.Data
         assert isinstance(Msg, Message)
@@ -235,25 +250,26 @@ class Node:
     def solidify(self, Packet, Time):
         """
         Not implemented yet, just calls the booker
-
+        """
+        self.SolBuffer[Packet.Data.Index] = Packet
+        
         Msg = Packet.Data
         Msg.solidify(self)
-        """
-        self.book(Packet, Time)
+        for msg in list(self.SolBuffer.keys()):
+            assert msg not in self.Ledger
+            if self.SolBuffer[msg].Data.Solid:
+                #self.SolBuffer[msg].EndTime = Time
+                pkt = self.SolBuffer.pop(msg)
+                self.book(pkt, Time)
+
 
     def book(self, Packet, Time):
         """
         Adds the message to the local copy of the ledger
         """
-        # make a shallow copy of the message and initialise metadata
         Msg = Packet.Data
-        assert isinstance(Msg, Message)
-        assert Msg.Index not in self.Ledger
+        assert isinstance(Msg, Message) and Msg.Index not in self.Ledger and Msg.Index not in self.SolBuffer
         self.Ledger[Msg.Index] = Msg
-        for p in Msg.Parents:
-            p.Children.append(Msg)
-        Msg.updateAW(self)
-        
         
         # mark this TX as received by this node
         self.Network.InformedNodes[Msg.Index] += 1
