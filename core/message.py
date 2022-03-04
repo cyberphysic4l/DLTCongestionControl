@@ -8,7 +8,6 @@ class Message:
     def __init__(self, IssueTime, Parents, Node, Network, Work=0, Index=None, VisibleTime=None, Milestone=False):
         self.IssueTime = IssueTime
         self.VisibleTime = VisibleTime
-        self.Children = []
         self.Parents = Parents
         self.Network = Network
         self.Index = Network.MsgIndex
@@ -18,6 +17,7 @@ class Message:
         self.Work = Work
         self.CWeight = Work
         self.LastCWUpdate = self
+        self.Dropped = False
         if Node:
             self.Solid = False
             self.NodeID = Node.NodeID # signature of issuing node
@@ -33,7 +33,7 @@ class Message:
             self.EligibleTime = 0
         Network.MsgIndex += 1
 
-    def mark_confirmed(self):
+    def mark_confirmed(self, Node = None):
         self.Confirmed = True
         self.Network.ConfirmedNodes[self.Index] +=1
         if self.Network.ConfirmedNodes[self.Index]==NUM_NODES:
@@ -41,7 +41,7 @@ class Message:
             self.Network.Nodes[self.NodeID].ConfMsgs[self.Index] = self
         for _,p in self.Parents.items():
             if not p.Confirmed:
-                p.mark_confirmed()
+                p.mark_confirmed(Node)
     
     def updateCW(self, updateMsg=None, Work=None):
         if updateMsg is None:
@@ -67,22 +67,13 @@ class Message:
             # if we have the parents in the ledger already, include them as parents
             if pID in Node.Ledger:
                 parents[pID] = Node.Ledger[pID]
+                assert parents[pID].IssueTime<self.IssueTime
             elif pID in Node.SolBuffer:
                 parents[pID] = Node.SolBuffer[pID].Data
+                assert parents[pID].IssueTime<self.IssueTime
             else:
                 parents[pID] = None
         Msg.Parents = parents
-        """
-        childrenIDs = [c.Index for c in Msg.Children]
-        children = []
-        for cID in childrenIDs:
-            # if children are waiting in the solidification buffer, then add them 
-            assert cID not in Node.Ledger # children should not already be in ledger as they can't yet be solid.
-            if cID in Node.SolBuffer:
-                children.append(Node.SolBuffer[cID].Data)
-                Node.SolBuffer[cID].Data.Parents.append(Msg)
-        Msg.Children = children
-        """
         if self.Index == 0:
             Msg.Eligible = True
             Msg.EligibleTime = 0
@@ -95,16 +86,19 @@ class Message:
             Msg.Solid = False
         return Msg
 
-    def solidify(self, Node):
+    def solidify(self, Node, TxNode=None, Time=None):
         solid = True
         for pID, p in self.Parents.items():
             if p is None:
                 solid = False
                 if pID not in Node.MissingParentIDs:
                     Node.MissingParentIDs[pID] = [self.Index]
+                    Node.Network.send_data(Node, TxNode, SolRequest(pID), Time)
                 else:
                     if self.Index not in Node.MissingParentIDs[pID]:
                         Node.MissingParentIDs[pID].append(self.Index)
+            elif not p.Solid:
+                solid = False
         self.Solid = solid
         if self.Solid:
             if self.Index in Node.MissingParentIDs:
@@ -112,16 +106,14 @@ class Message:
                     child = Node.SolBuffer[cID].Data
                     assert self.Index in child.Parents
                     child.Parents[self.Index] = self
+                    assert self.IssueTime < child.IssueTime
                     child.solidify(Node)
             
 
 
     def is_ready(self):
         eligConfParents = [p for _,p in self.Parents.items() if p.Eligible or p.Confirmed]
-        if len(eligConfParents)==1:
-            if 0 in self.Parents: # if one parent eligible/confirmed
-                return True
-        if len(eligConfParents)==2: # if two parents eligible/confirmed
+        if len(eligConfParents)==len(self.Parents):
             return True
         return False
 

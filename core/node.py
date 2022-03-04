@@ -134,11 +134,11 @@ class Node:
         """
         schedule msgs from inbox at a fixed deterministic rate NU
         """
-        # sort inboxes by arrival time
-        self.Inbox.AllPackets.sort(key=lambda p: p.EndTime)
-        self.Inbox.ReadyPackets.sort(key=lambda p: p.EndTime)
+        # sort inboxes by timestamp
+        self.Inbox.AllPackets.sort(key=lambda p: p.Data.IssueTime)
+        self.Inbox.ReadyPackets.sort(key=lambda p: p.Data.IssueTime)
         for NodeID in range(NUM_NODES):
-            self.Inbox.Packets[NodeID].sort(key=lambda p: p.EndTime)
+            self.Inbox.Packets[NodeID].sort(key=lambda p: p.Data.IssueTime)
         # process according to global rate Nu
         while self.Inbox.ReadyPackets or self.Inbox.Scheduled:
             if self.Inbox.Scheduled:
@@ -171,17 +171,9 @@ class Node:
         """
         Tip set manager
         """
-        is_malicious = (MODE[self.NodeID]>=3 and Msg.NodeID==self.NodeID)
         
-        # add to tip set if no eligible children
-        isTip = True
-        for c in Msg.Children:
-            self.Inbox.update_ready(c)
-            if c.Eligible:
-                isTip = False
-                break
-        if isTip:
-            self.add_tip(Msg)
+        self.Inbox.update_ready()
+        self.add_tip(Msg)
 
         # if this is a malicious nodes own message and ATK_TIP_RM_PARENTS is False, then don't remove the tips it selected as parents
         if MODE[self.NodeID]>=3 and Msg.NodeID==self.NodeID and not ATK_TIP_RM_PARENTS:
@@ -202,11 +194,12 @@ class Node:
     def schedule(self, TxNode, Msg: Message, Time):
         # add to eligible set
         assert not Msg.Eligible
+        assert Msg.Index in self.Ledger
         if CONF_TYPE=='CW':
             Msg.updateCW()
         # if message is a milestone, mark its past cone as confirmed
         if CONF_TYPE=='Coo' and Msg.Milestone:
-            Msg.mark_confirmed()
+            Msg.mark_confirmed(self)
         Msg.Eligible = True
         self.update_tipsset(Msg)
         Msg.EligibleTime = Time
@@ -254,7 +247,7 @@ class Node:
         self.SolBuffer[Packet.Data.Index] = Packet
         
         Msg = Packet.Data
-        Msg.solidify(self)
+        Msg.solidify(self, Packet.TxNode, Time)
         for msg in list(self.SolBuffer.keys()):
             assert msg not in self.Ledger
             if self.SolBuffer[msg].Data.Solid:
@@ -341,9 +334,10 @@ class Node:
                 if sum(self.Inbox.Work)>MAX_BUFFER:
                     ScaledWork = np.array([self.Inbox.Work[NodeID]/REP[NodeID] for NodeID in range(NUM_NODES)])
                     MalNodeID = np.argmax(ScaledWork)
-                    packet = self.Inbox.Packets[MalNodeID][0]
+                    packet = self.Inbox.Packets[MalNodeID][-1] # Head drop
                     self.Inbox.remove_packet(packet)
                     self.DroppedPackets[MalNodeID].append(packet)
+                    packet.Data.Dropped = True
 
     def prune(self, TxNode, NodeID, Forward):
         neighbID = self.Neighbours.index(TxNode)

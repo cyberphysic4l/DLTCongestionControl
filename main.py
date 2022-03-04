@@ -401,7 +401,7 @@ def plot_results(dirstr, per_node_result_keys):
     plt.savefig(dirstr+'/plots/Throughput.png', bbox_inches='tight')
     
 
-    plot_cdf(latencies, 'Latency (sec)', dirstr+'/plots/Latency.png')
+    #plot_cdf(latencies, 'Latency (sec)', dirstr+'/plots/Latency.png')
     
     #ax4.plot(np.arange(0, SIM_TIME, STEP), np.sum(avgLmds, axis=1), color='tab:blue')
 

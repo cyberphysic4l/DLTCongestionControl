@@ -19,15 +19,13 @@ class Inbox:
         self.Avg = 0
         self.RequestedMsgIDs = []
 
-    def update_ready(self, Msg: msg.Message):
-        if Msg.Index in self.MsgIDs:
-            packetList = [p for p in self.AllPackets if p.Data.Index==Msg.Index]
-            assert len(packetList)==1
-            Packet = packetList[0]
-        else:
-            return
-        if Packet not in self.ReadyPackets and Msg.is_ready():
-            self.ReadyPackets.append(Packet)
+    def update_ready(self):
+        """
+        Needs to be updated to only check when needed
+        """
+        for pkt in self.AllPackets:
+            if pkt not in self.ReadyPackets and pkt.Data.is_ready():
+                self.ReadyPackets.append(pkt)
     
     def add_packet(self, Packet):
         Msg = Packet.Data
@@ -41,7 +39,7 @@ class Inbox:
         else:
             self.Packets[NodeID].append(Packet)
         self.AllPackets.append(Packet)
-        # check if eligible
+        # check parents are eligible
         if Msg.is_ready():
             self.ReadyPackets.append(Packet)
         self.MsgIDs.append(Msg.Index)
