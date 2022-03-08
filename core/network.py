@@ -11,12 +11,14 @@ class Network:
     def __init__(self, AdjMatrix):
         self.A = AdjMatrix
         self.MsgIndex = 0
-        self.InformedNodes = {}
-        self.ConfirmedNodes = {}
+        self.InformedNodes = {0: [NodeID for NodeID in range(NUM_NODES)]}
+        self.ScheduledNodes = {0: [NodeID for NodeID in range(NUM_NODES)]}
+        self.ConfirmedNodes = {0: [NodeID for NodeID in range(NUM_NODES)]}
         self.Nodes = []
         self.CommChannels = []
-        self.Throughput = [0 for NodeID in range(NUM_NODES)]
-        self.WorkThroughput = [0 for NodeID in range(NUM_NODES)]
+        self.Disseminated = [0 for NodeID in range(NUM_NODES)]
+        self.Scheduled = [0 for NodeID in range(NUM_NODES)]
+        self.WorkDisseminated = [0 for NodeID in range(NUM_NODES)]
         self.MsgDelays = {}
         self.VisMsgDelays = {}
         self.DissemTimes = {}

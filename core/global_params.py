@@ -2,13 +2,13 @@ import numpy as np
 
 # Simulation Parameters
 MONTE_CARLOS = 1
-SIM_TIME = 300
+SIM_TIME = 600
 STEP = 0.01
 # Network Parameters
-NU = 10
+NU = 20
 NUM_NODES = 20
 NUM_NEIGHBOURS = 4
-START_TIMES = 100*np.ones(NUM_NODES)
+START_TIMES = 10*np.ones(NUM_NODES)
 GRAPH = 'regular'
 REPDIST = 'zipf'
 if REPDIST=='zipf':
@@ -40,9 +40,12 @@ MAX_TH = MIN_TH
 P_B = 0.5 # Not used if MAX_TH==MIN_TH
 W_Q = 0.1 # for exponential moving average of inbox length measurement
 # Scheduler
-SCHEDULING = 'drr_lds'
+SCHEDULING = 'drr_ready'
 QUANTUM = [MAX_WORK*rep/sum(REP) for rep in REP]
+
+# Buffer Manager
 MAX_BUFFER = 200 # W_max
+DROP_TYPE = 'tail'
 
 # Dash visualisation
 DASH = False

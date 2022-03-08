@@ -219,7 +219,57 @@ def per_node_plot(data: np.ndarray, xlabel: str, ylabel: str, title: str, dirstr
         fig.legend(ModeLines, [mode_names[i] for i in modes], loc=legend_loc)
 
     plt.figtext(0.5, 0.01, figtxt, wrap=True, horizontalalignment='center', fontsize=12)
-    plt.savefig(dirstr, bbox_inches='tight')
+    plt.savefig(dirstr+'/plots/'+ylabel+'.png', bbox_inches='tight')
+
+def scaled_rate_plot(data: np.ndarray, xlabel: str, ylabel: str, title: str, dirstr: str, avg_window: int = 1000, legend_loc: str = 'right', modes = None, step=STEP, figtxt = ''):
+    
+    fig, ax = plt.subplots(2,1, sharex=True, figsize=(8,8))
+    ax[0].grid(linestyle='--')
+    ax[1].grid(linestyle='--')
+    ax[1].set_xlabel(xlabel)
+    ax[0].set_ylabel(ylabel)
+    ax[1].set_ylabel('Scaled '+ylabel)
+
+    if modes is None:
+        modes = list(set(MODE))
+    mode_names = ['Inactive', 'Content','Best-effort', 'Malicious', 'Multi-rate']
+    colors = ['tab:gray', 'tab:blue', 'tab:red', 'tab:green', 'tab:olive']
+    for NodeID in range(NUM_NODES):
+        if MODE[NodeID] in modes and np.any(data[:, NodeID]):
+            ax[0].plot(np.arange(avg_window*STEP, SIM_TIME, STEP), (data[avg_window:,NodeID]-data[:-avg_window,NodeID])/(avg_window*STEP), linewidth=5*REP[NodeID]/REP[0], color=colors[MODE[NodeID]])
+            ax[1].plot(np.arange(avg_window*STEP, SIM_TIME, STEP), (data[avg_window:,NodeID]-data[:-avg_window,NodeID])*sum(REP)/(NU*REP[NodeID]*avg_window*STEP), linewidth=5*REP[NodeID]/REP[0], color=colors[MODE[NodeID]])
+    
+    ax[0].set_xlim(0, SIM_TIME)
+    ax[1].set_xlim(0, SIM_TIME)
+    ModeLines = [Line2D([0],[0],color=colors[mode], lw=4) for mode in modes]
+    if len(modes)>1:
+        fig.legend(ModeLines, [mode_names[i] for i in modes], loc=legend_loc)
+
+    plt.figtext(0.5, 0.01, figtxt, wrap=True, horizontalalignment='center', fontsize=12)
+    plt.savefig(dirstr+'/plots/Scaled '+ylabel+'.png', bbox_inches='tight')
+
+def per_node_rate_plot(data: np.ndarray, xlabel: str, ylabel: str, title: str, dirstr: str, avg_window: int = 1000, legend_loc: str = 'upper right', modes = None, step=STEP, figtxt = ''):
+    fig, ax = plt.subplots(figsize=(8,4))
+    ax.grid(linestyle='--')
+    ax.set_xlabel(xlabel)
+    ax.set_ylabel(ylabel)
+    ax.title.set_text(title)
+
+    if modes is None:
+        modes = list(set(MODE))
+    mode_names = ['Inactive', 'Content','Best-effort', 'Malicious', 'Multi-rate']
+    colors = ['tab:gray', 'tab:blue', 'tab:red', 'tab:green', 'tab:olive']
+    for NodeID in range(NUM_NODES):
+        if MODE[NodeID] in modes and np.any(data[:, NodeID]):
+            ax.plot(np.arange(avg_window*STEP, SIM_TIME, STEP), (data[avg_window:,NodeID]-data[:-avg_window,NodeID])/(avg_window*STEP), color=colors[MODE[NodeID]])
+    
+    ax.set_xlim(0, SIM_TIME)
+    ModeLines = [Line2D([0],[0],color=colors[mode], lw=4) for mode in modes]
+    if len(modes)>1:
+        fig.legend(ModeLines, [mode_names[i] for i in modes], loc=legend_loc)
+
+    plt.figtext(0.5, 0.01, figtxt, wrap=True, horizontalalignment='center', fontsize=12)
+    plt.savefig(dirstr+'/plots/'+ylabel+'.png', bbox_inches='tight')
 
 
 def per_node_plotly_plot(time, data: np.ndarray, xlabel: str, ylabel: str, title: str, avg_window: int = 2000, legend_loc: str = 'upper right', modes = None, step=STEP):

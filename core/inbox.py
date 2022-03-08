@@ -9,8 +9,9 @@ class Inbox:
     def __init__(self, Node):
         self.Node = Node
         self.AllPackets = [] # Inbox_m
-        self.ReadyPackets = []
+        self.AllReadyPackets = []
         self.Packets = [[] for NodeID in range(NUM_NODES)] # Inbox_m(i)
+        self.ReadyPackets = [[] for NodeID in range(NUM_NODES)] # Inbox_m(i)
         self.Work = np.zeros(NUM_NODES)
         self.MsgIDs = []
         self.RRNodeID = np.random.randint(NUM_NODES) # start at a random node
@@ -18,14 +19,25 @@ class Inbox:
         self.Scheduled = []
         self.Avg = 0
         self.RequestedMsgIDs = []
+        self.DroppedPackets = {}
 
     def update_ready(self):
         """
         Needs to be updated to only check when needed
         """
         for pkt in self.AllPackets:
-            if pkt not in self.ReadyPackets and pkt.Data.is_ready():
-                self.ReadyPackets.append(pkt)
+            if pkt not in self.AllReadyPackets and self.is_ready(pkt.Data):
+                self.AllReadyPackets.append(pkt)
+                self.ReadyPackets[pkt.Data.NodeID].append(pkt)
+        
+    def is_ready(self, Msg):
+        for pID,p in Msg.Parents.items():
+            if not p.Eligible and not p.Confirmed:
+                if pID in self.DroppedPackets:
+                    Packet = self.DroppedPackets.pop(pID)
+                    self.Node.enqueue(Packet)
+                return False
+        return True
     
     def add_packet(self, Packet):
         Msg = Packet.Data
@@ -40,8 +52,9 @@ class Inbox:
             self.Packets[NodeID].append(Packet)
         self.AllPackets.append(Packet)
         # check parents are eligible
-        if Msg.is_ready():
-            self.ReadyPackets.append(Packet)
+        if self.is_ready(Msg):
+            self.AllReadyPackets.append(Packet)
+            self.ReadyPackets[NodeID].append(Packet)
         self.MsgIDs.append(Msg.Index)
         self.Work[NodeID] += Packet.Data.Work
        
@@ -52,17 +65,22 @@ class Inbox:
         if self.MsgIDs:
             if Packet in self.AllPackets:
                 self.AllPackets.remove(Packet)
-                if Packet in self.ReadyPackets:
-                    self.ReadyPackets.remove(Packet)
+                if Packet in self.AllReadyPackets:
+                    self.AllReadyPackets.remove(Packet)
+                    self.ReadyPackets[Packet.Data.NodeID].remove(Packet)
                 self.Packets[Packet.Data.NodeID].remove(Packet)
                 self.MsgIDs.remove(Packet.Data.Index)  
                 self.Work[Packet.Data.NodeID] -= Packet.Data.Work
+
+    def drop_packet(self, Packet):
+        self.remove_packet(Packet)
+        self.DroppedPackets[Packet.Data.Index] = Packet
     
     def drr_lds_schedule(self, Time):
         if self.Scheduled:
             return self.Scheduled.pop(0)
         
-        Packets = [self.ReadyPackets]
+        Packets = [self.AllPackets]
         while Packets[0] and not self.Scheduled:
             if self.Deficit[self.RRNodeID]<MAX_WORK:
                 self.Deficit[self.RRNodeID] += QUANTUM[self.RRNodeID]
@@ -71,14 +89,7 @@ class Inbox:
                 Packet = self.Packets[self.RRNodeID][i]
                 if Packet not in Packets[0]:
                     i += 1
-                    '''
-                    for trans in [p for p in Packet.Data.Parents]:
-                        if trans.Index not in self.RequestedTranIDs and trans.Index not in self.TranIDs and not (trans.Eligible or trans.Confirmed):
-                            # send a solidification request for this tran's parents
-                            self.Node.Network.send_data(self.Node, Packet.TxNode, tran.SolRequest(trans.Index), Time)
-                            self.RequestedTranIDs.append(trans.Index)
                     continue
-                '''
                 Work = Packet.Data.Work
                 if self.Deficit[self.RRNodeID]>=Work and Packet.EndTime<=Time:
                     self.Deficit[self.RRNodeID] -= Work
@@ -91,6 +102,29 @@ class Inbox:
             self.RRNodeID = (self.RRNodeID+1)%NUM_NODES
         if self.Scheduled:
             return self.Scheduled.pop(0)
+
+    def drr_ready_schedule(self, Time):
+        if self.Scheduled:
+            return self.Scheduled.pop(0)
+        
+        while self.AllReadyPackets and not self.Scheduled:
+            if self.Deficit[self.RRNodeID]<MAX_WORK:
+                self.Deficit[self.RRNodeID] += QUANTUM[self.RRNodeID]
+            i = 0
+            while self.ReadyPackets[self.RRNodeID] and i<len(self.ReadyPackets[self.RRNodeID]):
+                Packet = self.ReadyPackets[self.RRNodeID][i]
+                Work = Packet.Data.Work
+                if self.Deficit[self.RRNodeID]>=Work and Packet.EndTime<=Time:
+                    self.Deficit[self.RRNodeID] -= Work
+                    # remove the message from all inboxes
+                    self.remove_packet(Packet)
+                    self.Scheduled.append(Packet)
+                else:
+                    i += 1
+                    continue
+            self.RRNodeID = (self.RRNodeID+1)%NUM_NODES
+        if self.Scheduled:
+            return self.Scheduled.pop(0) 
                     
     def fifo_schedule(self, Time):
         if self.AllPackets:

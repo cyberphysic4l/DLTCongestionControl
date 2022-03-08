@@ -136,19 +136,22 @@ class Node:
         """
         # sort inboxes by timestamp
         self.Inbox.AllPackets.sort(key=lambda p: p.Data.IssueTime)
-        self.Inbox.ReadyPackets.sort(key=lambda p: p.Data.IssueTime)
+        self.Inbox.AllReadyPackets.sort(key=lambda p: p.Data.IssueTime)
         for NodeID in range(NUM_NODES):
             self.Inbox.Packets[NodeID].sort(key=lambda p: p.Data.IssueTime)
         # process according to global rate Nu
-        while self.Inbox.ReadyPackets or self.Inbox.Scheduled:
+        while self.Inbox.AllReadyPackets or self.Inbox.Scheduled:
             if self.Inbox.Scheduled:
                 nextSchedTime = self.LastScheduleTime+(self.LastScheduleWork/NU)
             else:
-                nextSchedTime = max(self.LastScheduleTime+(self.LastScheduleWork/NU), self.Inbox.ReadyPackets[0].EndTime)
+                newestPacket = min(self.Inbox.AllReadyPackets, key = lambda p: p.EndTime)
+                nextSchedTime = max(self.LastScheduleTime+(self.LastScheduleWork/NU), newestPacket.EndTime)
                 
             if nextSchedTime<Time+STEP:             
                 if SCHEDULING=='drr_lds':
                     Packet = self.Inbox.drr_lds_schedule(nextSchedTime)
+                if SCHEDULING=='drr_ready':
+                    Packet = self.Inbox.drr_ready_schedule(nextSchedTime)
                 elif SCHEDULING=='fifo':
                     Packet = self.Inbox.fifo_schedule(nextSchedTime)
 
@@ -192,11 +195,17 @@ class Node:
             self.remove_tip(oldestTip)
     
     def schedule(self, TxNode, Msg: Message, Time):
+        assert self.Inbox.is_ready(Msg)
+        assert self.NodeID in self.Network.InformedNodes[Msg.Index]
+        assert not self.NodeID in self.Network.ScheduledNodes[Msg.Index]
+        self.Network.ScheduledNodes[Msg.Index].append(self.NodeID)
+        if len(self.Network.ScheduledNodes[Msg.Index])==NUM_NODES:
+            self.Network.Scheduled[Msg.NodeID] += 1
         # add to eligible set
         assert not Msg.Eligible
         assert Msg.Index in self.Ledger
         if CONF_TYPE=='CW':
-            Msg.updateCW()
+            Msg.updateCW(self)
         # if message is a milestone, mark its past cone as confirmed
         if CONF_TYPE=='Coo' and Msg.Milestone:
             Msg.mark_confirmed(self)
@@ -265,10 +274,11 @@ class Node:
         self.Ledger[Msg.Index] = Msg
         
         # mark this TX as received by this node
-        self.Network.InformedNodes[Msg.Index] += 1
-        if self.Network.InformedNodes[Msg.Index]==NUM_NODES:
-            self.Network.Throughput[Msg.NodeID] += 1
-            self.Network.WorkThroughput[Msg.NodeID] += Msg.Work
+        assert not self.NodeID in self.Network.InformedNodes[Msg.Index]
+        self.Network.InformedNodes[Msg.Index].append(self.NodeID)
+        if len(self.Network.InformedNodes[Msg.Index])==NUM_NODES:
+            self.Network.Disseminated[Msg.NodeID] += 1
+            self.Network.WorkDisseminated[Msg.NodeID] += Msg.Work
             self.Network.MsgDelays[Msg.Index] = Time-Msg.IssueTime
             self.Network.VisMsgDelays[Msg.Index] = Time-Msg.VisibleTime
             self.Network.DissemTimes[Msg.Index] = Time
@@ -283,7 +293,7 @@ class Node:
 
         self.enqueue(Packet, Time)
     
-    def check_congestion(self, Time):
+    def check_congestion(self):
         """
         Check for rate setting
         """
@@ -316,7 +326,7 @@ class Node:
             else: # malicious
                 self.Lambda = 5*NU*REP[self.NodeID]/sum(REP)
             
-    def enqueue(self, Packet, Time):
+    def enqueue(self, Packet, Time=None):
         """
         Add to inbox if not already in inbox or already eligible
         """
@@ -324,18 +334,22 @@ class Node:
             if not Packet.Data.Eligible:
                 self.Inbox.add_packet(Packet)
                 self.ArrivalWorks.append(Packet.Data.Work)
-                self.ArrivalTimes.append(Time)
-                if Packet.Data.NodeID==self.NodeID:
-                    #self.Inbox.Avg = (1-W_Q)*self.Inbox.Avg + W_Q*len(self.Inbox.Packets[self.NodeID])
-                    self.check_congestion(Time)
+                if Time is not None: # Time is none if we are re-adding a dropped packet
+                    self.ArrivalTimes.append(Time)
+                    if Packet.Data.NodeID==self.NodeID:
+                        #self.Inbox.Avg = (1-W_Q)*self.Inbox.Avg + W_Q*len(self.Inbox.Packets[self.NodeID])
+                        self.check_congestion()
                 '''
                 Buffer Management - Drop head queue
                 '''                
                 if sum(self.Inbox.Work)>MAX_BUFFER:
                     ScaledWork = np.array([self.Inbox.Work[NodeID]/REP[NodeID] for NodeID in range(NUM_NODES)])
                     MalNodeID = np.argmax(ScaledWork)
-                    packet = self.Inbox.Packets[MalNodeID][-1] # Head drop
-                    self.Inbox.remove_packet(packet)
+                    if DROP_TYPE=='head':
+                        packet = self.Inbox.Packets[MalNodeID][0] # Head drop
+                    elif DROP_TYPE=='tail':
+                        packet = self.Inbox.Packets[MalNodeID][-1] # Tail drop
+                    self.Inbox.drop_packet(packet)
                     self.DroppedPackets[MalNodeID].append(packet)
                     packet.Data.Dropped = True
 

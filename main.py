@@ -12,7 +12,7 @@ import sys
 from time import gmtime, strftime
 from core.global_params import *
 from core.network import Network, Packet
-from utils import all_node_plot, per_node_barplot, per_node_plot, per_node_plotly_plot, plot_cdf
+from utils import all_node_plot, per_node_barplot, per_node_plot, per_node_plotly_plot, plot_cdf, per_node_rate_plot, scaled_rate_plot
 import plotly.express as px
 import plotly.graph_objects as go
 import dash
@@ -91,8 +91,8 @@ def update_line_chart(*args):
                 if 100*Net.Nodes[NodeID].LambdaD/NU != args[NodeID+2]:
                     Net.Nodes[NodeID].LambdaD = NU*args[NodeID+2]/100
                     Net.Nodes[NodeID].MsgPool = []
-            Throughput[TimeSteps+i, NodeID] = Net.Throughput[NodeID]
-            RepThroughput[TimeSteps+i, NodeID] = Net.Throughput[NodeID]*sum(REP)/REP[NodeID]
+            Throughput[TimeSteps+i, NodeID] = Net.Disseminated[NodeID]
+            RepThroughput[TimeSteps+i, NodeID] = Net.Disseminated[NodeID]*sum(REP)/REP[NodeID]
             InboxLens[TimeSteps-n_steps+i,NodeID] = len(Net.Nodes[NodeID].Inbox.AllPackets)
             TipsSet[TimeSteps-n_steps+i,NodeID] = len(Net.Nodes[NodeID].TipsSet)
             HonTipsSet[TimeSteps-n_steps+i,NodeID] = sum([len(Net.Nodes[NodeID].NodeTipsSet[i]) for i in range(NUM_NODES) if MODE[i]<3])
@@ -129,17 +129,22 @@ def main():
                                 'Inbox Lengths',
                                 'Inbox Lengths (moving average)',
                                 'Deficits',
-                                'Message Throughput',
-                                'Work Throughput',
+                                'Number of Disseminated Messages',
                                 'Number of Undisseminated Messages',
                                 'Number of Confirmed Messages',
                                 'Number of Unconfirmed Messages',
+                                'Number of Scheduled Messages',
                                 'Max Unconfirmed Message Age', 
                                 'Solidification Buffer Length']
-        dirstr, per_node_result_keys = simulate(per_node_result_keys)
+        dirstr = os.path.dirname(os.path.realpath(__file__)) + '/results/'+ strftime("%Y-%m-%d_%H%M%S", gmtime())
+        os.makedirs(dirstr, exist_ok=True)
+        os.makedirs(dirstr+'/raw', exist_ok=True)
+        os.makedirs(dirstr+'/plots', exist_ok=True)
+        shutil.copy("core/global_params.py", dirstr+"/global_params.txt")
+        per_node_result_keys = simulate(per_node_result_keys, dirstr)
         plot_results(dirstr, per_node_result_keys)
     
-def simulate(per_node_result_keys):
+def simulate(per_node_result_keys, dirstr):
     """
     Setup simulation inputs and instantiate output arrays
     """
@@ -158,8 +163,6 @@ def simulate(per_node_result_keys):
     per_node_results = {}
     for k in per_node_result_keys:
         per_node_results[k] = [np.zeros((TimeSteps, NUM_NODES)) for mc in range(MONTE_CARLOS)]
-    per_node_results['Message Dissemination Rate'] = []
-    per_node_results['Work Dissemination Rate'] = []
     MeanDelay = [np.zeros(SIM_TIME) for mc in range(MONTE_CARLOS)]
     MeanVisDelay = [np.zeros(SIM_TIME) for mc in range(MONTE_CARLOS)]
     Unsolid = [np.zeros((TimeSteps, NUM_NODES)) for mc in range(MONTE_CARLOS)]
@@ -208,7 +211,7 @@ def simulate(per_node_result_keys):
                         OldestPacket = min(HonestPackets, key=lambda x: x.Data.IssueTime)
                         OldestTxAges[i,NodeID] = T - OldestPacket.Data.IssueTime
                 per_node_results['Inbox Lengths'][mc][i,NodeID] = len(Node.Inbox.AllPackets)
-                per_node_results['Ready Lengths'][mc][i,NodeID] = len(Node.Inbox.ReadyPackets)
+                per_node_results['Ready Lengths'][mc][i,NodeID] = len(Node.Inbox.AllReadyPackets)
                 per_node_results['Dropped Messages'][mc][i,NodeID] = sum([len(Node.DroppedPackets[i]) for i in range(NUM_NODES)])
                 if sum([len(n.DroppedPackets[NodeID]) for n in Net.Nodes]):
                     Droppees[NodeID] = sum([len(n.DroppedPackets[NodeID]) for n in Net.Nodes])
@@ -218,14 +221,15 @@ def simulate(per_node_result_keys):
                 #Unsolid[mc][i,NodeID] = len([msg for _,msg in Net.Nodes[NodeID].Ledger.items() if not msg.Solid])
                 per_node_results['Inbox Lengths (moving average)'][mc][i,NodeID] = Node.Inbox.Avg
                 per_node_results['Deficits'][mc][i, NodeID] = Net.Nodes[0].Inbox.Deficit[NodeID]
-                per_node_results['Message Throughput'][mc][i, NodeID] = Net.Throughput[NodeID]
-                per_node_results['Work Throughput'][mc][i,NodeID] = Net.WorkThroughput[NodeID]
+                per_node_results['Number of Disseminated Messages'][mc][i, NodeID] = Net.Disseminated[NodeID]
+                per_node_results['Number of Scheduled Messages'][mc][i, NodeID] = Net.Scheduled[NodeID]
+                #per_node_results['Work Disseminated'][mc][i,NodeID] = Net.WorkDisseminated[NodeID]
                 per_node_results['Number of Undisseminated Messages'][mc][i,NodeID] = Node.Undissem
                 per_node_results['Number of Confirmed Messages'][mc][i,NodeID] = len(Node.ConfMsgs)
                 per_node_results['Number of Unconfirmed Messages'][mc][i,NodeID] = len(Node.UnconfMsgs)
                 per_node_results['Solidification Buffer Length'][mc][i,NodeID] = len(Node.SolBuffer)
-                if len(Node.SolBuffer)>100:
-                    print("Solidification issue")
+                #if len(Node.SolBuffer)>100:
+                    #print("Solidification issue")
                 if Node.UnconfMsgs:
                     OldestMsgIdx = min(Node.UnconfMsgs, key=lambda x: Node.UnconfMsgs[x].IssueTime)
                     age = T+STEP-Node.UnconfMsgs[OldestMsgIdx].IssueTime
@@ -259,9 +263,6 @@ def simulate(per_node_result_keys):
                 
         latencies, latTimes = Net.msg_latency(latencies, latTimes)
         
-        per_node_results['Message Dissemination Rate'].append(np.concatenate((np.zeros((1000, NUM_NODES)),(per_node_results['Message Throughput'][mc][1000:,:]-per_node_results['Message Throughput'][mc][:-1000,:])))/10)
-        per_node_results['Work Dissemination Rate'].append(np.concatenate((np.zeros((1000, NUM_NODES)),(per_node_results['Work Throughput'][mc][1000:,:]-per_node_results['Work Throughput'][mc][:-1000,:])))/10)
-        #TP.append(np.convolve(np.zeros((Throughput[mc][500:,:]-Throughput[mc][:-500,:])))/5)
         del Net
     """
     Get results
@@ -281,11 +282,6 @@ def simulate(per_node_result_keys):
     """
     Create a directory for these results and save them
     """
-    dirstr = os.path.dirname(os.path.realpath(__file__)) + '/results/'+ strftime("%Y-%m-%d_%H%M%S", gmtime())
-    os.makedirs(dirstr, exist_ok=True)
-    os.makedirs(dirstr+'/raw', exist_ok=True)
-    os.makedirs(dirstr+'/plots', exist_ok=True)
-    shutil.copy("core/global_params.py", dirstr+"/global_params.txt")
     np.savetxt(dirstr+'/raw/avgLmds.csv', avgLmds, delimiter=',')
     np.savetxt(dirstr+'/raw/avgPIT.csv', avgPIT, delimiter=',')
     for k in per_node_results:
@@ -305,7 +301,7 @@ def simulate(per_node_result_keys):
         np.savetxt(dirstr+'/raw/ArrTimes'+str(NodeID)+'.csv',
                    np.asarray(ArrTimes[NodeID]), delimiter=',')
     nx.write_adjlist(G, dirstr+'/raw/result_adjlist.txt', delimiter=' ')
-    return dirstr, per_node_results.keys()
+    return per_node_results.keys()
 
 
     
@@ -351,43 +347,14 @@ def plot_results(dirstr, per_node_result_keys):
     """
     Plot results
     """
-    avgTP = per_node_results['Work Dissemination Rate']
-    fig1, ax1 = plt.subplots(2,1, sharex=True, figsize=(8,8))
-    ax1[0].title.set_text('Dissemination Rate')
-    ax1[1].title.set_text('Scaled Dissemination Rate')
-    ax1[0].grid(linestyle='--')
-    ax1[1].grid(linestyle='--')
-    ax1[1].set_xlabel('Time (sec)')
-    #ax1[0].set_ylabel(r'${\lambda_i} / {\~{\lambda}_i}$')
-    ax1[0].set_ylabel(r'$D_i$')
-    ax1[1].set_ylabel(r'$D_i / {\~{\lambda}_i}$')
-    mal = False
-    iot = False
-    modes = list(set(MODE))
-    mode_names = ['Inactive', 'Content','Best-effort', 'Malicious', 'Multi-rate']
-    colors = ['tab:gray', 'tab:blue', 'tab:red', 'tab:green', 'tab:olive']
-    for NodeID in range(NUM_NODES):
-        if IOT[NodeID]:
-            iot = True
-            marker = 'x'
-        else:
-            marker = None
-        ax1[0].plot(np.arange(10, SIM_TIME, STEP), avgTP[1000:,NodeID], linewidth=5*REP[NodeID]/REP[0], color=colors[MODE[NodeID]], marker=marker, markevery=0.1)
-        ax1[1].plot(np.arange(10, SIM_TIME, STEP), avgTP[1000:,NodeID]*sum(REP)/(NU*REP[NodeID]), linewidth=5*REP[NodeID]/REP[0], color=colors[MODE[NodeID]], marker=marker, markevery=0.1)
-
-    if iot:
-        ModeLines = [Line2D([0],[0],color='tab:blue'), Line2D([0],[0],color='tab:red'), Line2D([0],[0],color='tab:blue', marker='x'), Line2D([0],[0],color='tab:red', marker='x')]
-        fig1.legend(ModeLines, ['Content value node','Best-effort value node', 'Content IoT node', 'Best-effort IoT node'], loc='right')
-    elif len(modes)>1:
-        ModeLines = [Line2D([0],[0],color=colors[mode], lw=4) for mode in modes]
-        fig1.legend(ModeLines, [mode_names[i] for i in modes], loc='right')
-    plt.savefig(dirstr+'/plots/Rates.png', bbox_inches='tight')
-    
+    avg_window = 1000
+    data = per_node_results['Number of Scheduled Messages']
+    avgTP = np.concatenate((np.zeros((avg_window, NUM_NODES)),(data[avg_window:,:]-data[:-avg_window,:])))/(avg_window*STEP)
     fig2, ax2 = plt.subplots(figsize=(8,4))
     ax2.grid(linestyle='--')
     ax2.set_xlabel('Time (sec)')
-    HonestTP = sum(avgTP[1000:,NodeID] for NodeID in range(NUM_NODES) if MODE[NodeID]<3)
-    MaxHonestTP = NU*sum([rep for i,rep in enumerate(REP) if MODE[i]<3])/sum(REP)
+    HonestTP = sum(avgTP[1000:,NodeID] for NodeID in range(NUM_NODES))# if MODE[NodeID]<3)
+    MaxHonestTP = NU#*sum([rep for i,rep in enumerate(REP) if MODE[i]<3])/sum(REP)
     ax2.plot(np.arange(10, SIM_TIME, STEP), 100*HonestTP/MaxHonestTP, color = 'black')
     ax22 = ax2.twinx()
     ax22.plot(np.arange(0, SIM_TIME, 1), avgMeanDelay, color='tab:gray')    
@@ -401,17 +368,32 @@ def plot_results(dirstr, per_node_result_keys):
     plt.savefig(dirstr+'/plots/Throughput.png', bbox_inches='tight')
     
 
-    #plot_cdf(latencies, 'Latency (sec)', dirstr+'/plots/Latency.png')
-    
-    #ax4.plot(np.arange(0, SIM_TIME, STEP), np.sum(avgLmds, axis=1), color='tab:blue')
+    plot_cdf(latencies, 'Latency (sec)', dirstr+'/plots/Latency.png')
 
-    per_node_plot(avgLmds, 'Time (sec)', r'$\lambda_i$', '', dirstr+'/plots/IssueRates.png', avg_window=1)
+    #per_node_plot(avgLmds, 'Time (sec)', r'$\lambda_i$', '', dirstr, avg_window=1)
     
     for k in per_node_results:
-        per_node_plot(per_node_results[k], 'Time (sec)', k, '', dirstr+'/plots/' + k +'.png', avg_window=100)
+        per_node_plot(per_node_results[k], 'Time (sec)', k, '', dirstr, avg_window=100)
 
-    per_node_plot(avgEligibleDelays, 'Time (sec)', 'Age of Messages Becoming Eligible', '', dirstr+'/plots/AvgEligibleDelays.png', avg_window=20, step=1)
-    per_node_plot(avgUnsolid, 'Time (sec)', 'Unsolid', '', dirstr+'/plots/AvgUnsolid.png')
+    
+    scaled_rate_plot(per_node_results['Number of Disseminated Messages'], 'Time (sec)', 'Dissemination Rate', '', dirstr)
+    scaled_rate_plot(per_node_results['Number of Confirmed Messages'], 'Time (sec)', 'Confirmation Rate', '', dirstr)
+    scaled_rate_plot(per_node_results['Number of Scheduled Messages'], 'Time (sec)', 'Scheduling Rate', '', dirstr)
+
+    per_node_rate_plot(per_node_results['Number of Disseminated Messages'], 'Time (sec)', 'Dissemination Rate', '', dirstr)
+    per_node_rate_plot(per_node_results['Number of Confirmed Messages'], 'Time (sec)', 'Confirmation Rate', '', dirstr)
+    per_node_rate_plot(per_node_results['Number of Scheduled Messages'], 'Time (sec)', 'Scheduling Rate', '', dirstr)
+
+    per_node_plot(avgEligibleDelays, 'Time (sec)', 'Age of Messages Becoming Eligible', '', dirstr, avg_window=20, step=1)
+    per_node_plot(avgUnsolid, 'Time (sec)', 'Unsolid', '', dirstr)
+    
+    per_node_barplot(REP, 'Node ID', 'Reputation', 'Reputation Distribution', dirstr+'/plots/RepDist.png')
+    per_node_barplot(QUANTUM, 'Node ID', 'Quantum', 'Quantum Distribution', dirstr+'/plots/QDist.png')
+
+    all_node_plot(per_node_results['Number of Unconfirmed Messages'].sum(axis=1), 'Time (sec)', 'Number of Unconfirmed Messages', '', dirstr+'/plots/AllUnconfirmed.png')
+    all_node_plot(avgPIT, 'Time (sec)', 'Number of packets in transit', '', dirstr+'/plots/PIT.png')
+    all_node_plot(avgOTA, 'Time (sec)', 'Max time in transit (sec)', '', dirstr+'/plots/MaxAge.png')
+
     """
     fig5a, ax5a = plt.subplots(figsize=(8,4))
     ax5a.grid(linestyle='--')
@@ -445,13 +427,6 @@ def plot_results(dirstr, per_node_result_keys):
     
     plt.savefig(dirstr+'/plots/InboxLenMA.png', bbox_inches='tight')
     """
-    
-    per_node_barplot(REP, 'Node ID', 'Reputation', 'Reputation Distribution', dirstr+'/plots/RepDist.png')
-    per_node_barplot(QUANTUM, 'Node ID', 'Quantum', 'Quantum Distribution', dirstr+'/plots/QDist.png')
-
-    all_node_plot(per_node_results['Number of Unconfirmed Messages'].sum(axis=1), 'Time (sec)', 'Number of Unconfirmed Messages', '', dirstr+'/plots/AllUnconfirmed.png')
-    all_node_plot(avgPIT, 'Time (sec)', 'Number of packets in transit', '', dirstr+'/plots/PIT.png')
-    all_node_plot(avgOTA, 'Time (sec)', 'Max time in transit (sec)', '', dirstr+'/plots/MaxAge.png')
 
 if __name__ == "__main__":
     main()

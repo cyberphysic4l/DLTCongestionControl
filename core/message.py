@@ -12,8 +12,9 @@ class Message:
         self.Network = Network
         self.Index = Network.MsgIndex
         self.Milestone = Milestone
-        Network.InformedNodes[self.Index] = 0
-        Network.ConfirmedNodes[self.Index] = 0
+        Network.InformedNodes[self.Index] = []
+        Network.ScheduledNodes[self.Index] = []
+        Network.ConfirmedNodes[self.Index] = []
         self.Work = Work
         self.CWeight = Work
         self.LastCWUpdate = self
@@ -35,15 +36,17 @@ class Message:
 
     def mark_confirmed(self, Node = None):
         self.Confirmed = True
-        self.Network.ConfirmedNodes[self.Index] +=1
-        if self.Network.ConfirmedNodes[self.Index]==NUM_NODES:
+        assert Node.NodeID in self.Network.ScheduledNodes[self.Index]
+        assert not Node.NodeID in self.Network.ConfirmedNodes[self.Index]
+        self.Network.ConfirmedNodes[self.Index].append(Node.NodeID)
+        if len(self.Network.ConfirmedNodes[self.Index])==NUM_NODES:
             self.Network.Nodes[self.NodeID].UnconfMsgs.pop(self.Index)
             self.Network.Nodes[self.NodeID].ConfMsgs[self.Index] = self
         for _,p in self.Parents.items():
             if not p.Confirmed:
                 p.mark_confirmed(Node)
     
-    def updateCW(self, updateMsg=None, Work=None):
+    def updateCW(self, Node, updateMsg=None, Work=None):
         if updateMsg is None:
             assert Work is None
             updateMsg = self
@@ -52,12 +55,12 @@ class Message:
             assert Work is not None
             self.CWeight += Work
             if self.CWeight >= CONF_WEIGHT:
-                self.mark_confirmed()
+                self.mark_confirmed(Node)
 
         self.LastCWUpdate = updateMsg
         for _,p in self.Parents.items():
             if not p.Confirmed and p.LastCWUpdate != updateMsg:
-                p.updateCW(updateMsg, Work)
+                p.updateCW(Node, updateMsg, Work)
     
     def copy(self, Node):
         Msg = copy(self)
@@ -99,6 +102,11 @@ class Message:
                         Node.MissingParentIDs[pID].append(self.Index)
             elif not p.Solid:
                 solid = False
+                if pID not in Node.MissingParentIDs:
+                    Node.MissingParentIDs[pID] = [self.Index]
+                else:
+                    if self.Index not in Node.MissingParentIDs[pID]:
+                        Node.MissingParentIDs[pID].append(self.Index)
         self.Solid = solid
         if self.Solid:
             if self.Index in Node.MissingParentIDs:
@@ -108,14 +116,6 @@ class Message:
                     child.Parents[self.Index] = self
                     assert self.IssueTime < child.IssueTime
                     child.solidify(Node)
-            
-
-
-    def is_ready(self):
-        eligConfParents = [p for _,p in self.Parents.items() if p.Eligible or p.Confirmed]
-        if len(eligConfParents)==len(self.Parents):
-            return True
-        return False
 
 class SolRequest:
     '''
