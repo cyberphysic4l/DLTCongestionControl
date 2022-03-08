@@ -4,6 +4,18 @@
   font-family: "Inter", sans-serif;
 }
 
+#header {
+  display: flex;
+  flex-direction: row;
+  padding: 5px;
+  align-items: center;
+}
+
+#header img {
+  height: 80px;
+  margin-right: 10px;
+}
+
 #tabs-graph .tab {
   border: none !important;
   border-bottom: 1px solid #d9e1ef !important;
@@ -15,26 +27,40 @@
 }
 
 #tabs-graph .tab.tab--selected {
-  border-bottom: 4px solid pink !important;
+  border-bottom: 4px solid #00e0ca !important;
 }
 
 .rates-wrapper {
-    display: flex;
-    flex-wrap: wrap;
+  display: flex;
+  flex-wrap: wrap;
 }
 
-.rates-wrapper > div{
-    flex-direction: row;
-    display: flex;
-    flex-wrap: wrap;
-    margin: 20px 30px 0px 0px;
+.rates-wrapper > div {
+  flex-direction: row;
+  display: flex;
+  flex-wrap: wrap;
+  margin: 20px 30px 0px 0px;
+  align-items: center;
 }
 
 .rates-wrapper > div input {
-    margin-left: 5px;
-    margin-bottom: 1rem;
-    border-style: solid;
-    background-color: transparent;
-    padding: 5px 4px;
-    border: 1px solid #d9e1ef;
+  margin-left: 5px;
+  border-style: solid;
+  background-color: transparent;
+  padding: 5px 4px;
+  border: 1px solid #d9e1ef;
+}
+
+button {
+  background: #00e0ca;
+  color: inherit;
+  border: none;
+  font: inherit;
+  cursor: pointer;
+  outline: inherit;
+  padding: 10px;
+}
+
+button#startstop {
+  margin: 10px 0;
 }

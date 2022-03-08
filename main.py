@@ -46,6 +46,10 @@ T = 0
 app = dash.Dash(__name__)
 
 app.layout = html.Div([
+    html.Div(id='header', children=[
+        html.Img(src='/assets/IOTA-Mark-Black.svg'),
+        html.H1('IOTA Congestion Control Algorithm Simulator')
+    ]),
     dcc.Tabs(id="tabs-graph", value='dissem-graph', children=[
         dcc.Tab(label='Dissemination Rate', value='dissem-graph'),
         dcc.Tab(label='Reputation-scaled Dissemination Rate', value='rep-dissem-graph'),
