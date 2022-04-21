@@ -26,16 +26,13 @@ class Inbox:
         Needs to be updated to only check when needed
         """
         for pkt in self.AllPackets:
-            if pkt not in self.AllReadyPackets and self.is_ready(pkt.Data):
+            if pkt not in self.AllReadyPackets and self.is_ready(pkt):
                 self.AllReadyPackets.append(pkt)
                 self.ReadyPackets[pkt.Data.NodeID].append(pkt)
         
-    def is_ready(self, Msg):
-        for pID,p in Msg.Parents.items():
+    def is_ready(self, Pkt):
+        for pID,p in Pkt.Data.Parents.items():
             if not p.Eligible and not p.Confirmed:
-                if pID in self.DroppedPackets:
-                    Packet = self.DroppedPackets.pop(pID)
-                    self.Node.enqueue(Packet)
                 return False
         return True
     
@@ -51,12 +48,19 @@ class Inbox:
         else:
             self.Packets[NodeID].append(Packet)
         self.AllPackets.append(Packet)
-        # check parents are eligible
-        if self.is_ready(Msg):
-            self.AllReadyPackets.append(Packet)
-            self.ReadyPackets[NodeID].append(Packet)
         self.MsgIDs.append(Msg.Index)
         self.Work[NodeID] += Packet.Data.Work
+        # check parents are eligible
+        if self.is_ready(Packet):
+            self.AllReadyPackets.append(Packet)
+            self.ReadyPackets[NodeID].append(Packet)
+
+        '''else:
+            for pID,p in Packet.Data.Parents.items():
+                if not p.Eligible and not p.Confirmed:
+                    if pID in self.DroppedPackets:
+                        p = self.DroppedPackets.pop(pID)
+                        self.Node.enqueue(p)'''
        
     def remove_packet(self, Packet):
         """
@@ -74,7 +78,11 @@ class Inbox:
 
     def drop_packet(self, Packet):
         self.remove_packet(Packet)
-        self.DroppedPackets[Packet.Data.Index] = Packet
+        msgID = Packet.Data.Index
+        for _,p in Packet.Data.Parents.items():
+            if msgID not in p.DependentChildren:
+                p.DependentChildren.append(msgID)
+        self.DroppedPackets[msgID] = Packet
     
     def drr_lds_schedule(self, Time):
         if self.Scheduled:

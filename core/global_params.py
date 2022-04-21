@@ -5,7 +5,7 @@ MONTE_CARLOS = 1
 SIM_TIME = 600
 STEP = 0.01
 # Network Parameters
-NU = 20
+NU = 10
 NUM_NODES = 20
 NUM_NEIGHBOURS = 4
 START_TIMES = 10*np.ones(NUM_NODES)
@@ -39,20 +39,22 @@ MIN_TH = 1 # W
 MAX_TH = MIN_TH
 P_B = 0.5 # Not used if MAX_TH==MIN_TH
 W_Q = 0.1 # for exponential moving average of inbox length measurement
+
 # Scheduler
 SCHEDULING = 'drr_ready'
 QUANTUM = [MAX_WORK*rep/sum(REP) for rep in REP]
 
 # Buffer Manager
-MAX_BUFFER = 200 # W_max
+MAX_BUFFER = 500 # W_max
 DROP_TYPE = 'tail'
+TIP_BLACKLIST = False
 
 # Dash visualisation
 DASH = False
 UPDATE_INTERVAL = 10
 
 # Tip selection
-L_MAX = 300
+L_MAX = 100
 
 # Gossip optimisation
 PRUNING = False
@@ -68,7 +70,7 @@ CONF_WEIGHT = 200
 
 # Attacker details
 ## Tip selection
-ATK_TIP_MAX_SIZE = False
-ATK_TIP_RM_PARENTS = False
+ATK_TIP_MAX_SIZE = True
+ATK_TIP_RM_PARENTS = True
 ## forwarding behaviour
 ATK_RAND_FORWARD = False

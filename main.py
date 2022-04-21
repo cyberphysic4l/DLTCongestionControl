@@ -193,7 +193,7 @@ def simulate(per_node_result_keys, dirstr):
         # output arrays
         for i in range(TimeSteps):
             if 100*i/TimeSteps%10==0:
-                print("Simulation: "+str(mc) +"\t " + str(int(100*i/TimeSteps))+"% Complete")
+                print("Simulation: "+str(mc+1) +"\t " + str(int(100*i/TimeSteps))+"% Complete")
             # discrete time step size specified by global variable STEP
             T = STEP*i
             """
@@ -236,7 +236,7 @@ def simulate(per_node_result_keys, dirstr):
                 else:
                     age = 0
                 per_node_results['Max Unconfirmed Message Age'][mc][i,NodeID] = age
-        print("Simulation: "+str(mc) +"\t 100% Complete")
+        print("Simulation: "+str(mc+1) +"\t 100% Complete")
         OldestTxAge.append(np.mean(OldestTxAges, axis=1))
         for i in range(SIM_TIME):
             delays = [Net.MsgDelays[j] for j in Net.MsgDelays if int(Net.DissemTimes[j])==i and MODE[Net.MsgIssuer[j]]<3]

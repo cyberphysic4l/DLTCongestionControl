@@ -49,6 +49,7 @@ class Node:
         self.ConfMsgs = {}
         self.SolBuffer = {}
         self.MissingParentIDs = {}
+        self.TipBlacklist = []
         
     def issue_msgs(self, Time):
         """
@@ -101,8 +102,9 @@ class Node:
         """
         Adds tip to the tips set
         """
-        self.TipsSet.append(tip)
-        self.NodeTipsSet[tip.NodeID].append(tip)
+        if tip.NodeID not in self.TipBlacklist:
+            self.TipsSet.append(tip)
+            self.NodeTipsSet[tip.NodeID].append(tip)
     
     def remove_tip(self, tip):
         """
@@ -195,7 +197,6 @@ class Node:
             self.remove_tip(oldestTip)
     
     def schedule(self, TxNode, Msg: Message, Time):
-        assert self.Inbox.is_ready(Msg)
         assert self.NodeID in self.Network.InformedNodes[Msg.Index]
         assert not self.NodeID in self.Network.ScheduledNodes[Msg.Index]
         self.Network.ScheduledNodes[Msg.Index].append(self.NodeID)
@@ -212,6 +213,11 @@ class Node:
         Msg.Eligible = True
         self.update_tipsset(Msg)
         Msg.EligibleTime = Time
+        # check if this message has dependent children that were dropped
+        for childIndex in Msg.DependentChildren:
+            if childIndex in self.Inbox.DroppedPackets:
+                Packet = self.Inbox.DroppedPackets.pop(childIndex)
+                self.enqueue(Packet)
         # broadcast the packet
         self.forward(TxNode, Msg, Time)
 
@@ -332,6 +338,19 @@ class Node:
         """
         if Packet.Data not in self.Inbox.MsgIDs:
             if not Packet.Data.Eligible:
+                '''
+                Buffer Management - if using tail drop, don't even add the packet if it is to be dropped.
+                ''' 
+                if sum(self.Inbox.Work)+Packet.Data.Work>MAX_BUFFER and DROP_TYPE=='tail':
+                    ScaledWork = np.array([self.Inbox.Work[NodeID]/REP[NodeID] for NodeID in range(NUM_NODES)])
+                    MalNodeID = np.argmax(ScaledWork)
+                    if MalNodeID==Packet.Data.NodeID:
+                        newestPacket = self.Inbox.Packets[MalNodeID][-1]
+                        if Packet.Data.IssueTime>newestPacket.Data.IssueTime:
+                            self.Inbox.drop_packet(Packet)
+                            self.DroppedPackets[MalNodeID].append(Packet)
+                            Packet.Data.Dropped = True
+                            return
                 self.Inbox.add_packet(Packet)
                 self.ArrivalWorks.append(Packet.Data.Work)
                 if Time is not None: # Time is none if we are re-adding a dropped packet
@@ -340,11 +359,12 @@ class Node:
                         #self.Inbox.Avg = (1-W_Q)*self.Inbox.Avg + W_Q*len(self.Inbox.Packets[self.NodeID])
                         self.check_congestion()
                 '''
-                Buffer Management - Drop head queue
+                Buffer Management
                 '''                
                 if sum(self.Inbox.Work)>MAX_BUFFER:
                     ScaledWork = np.array([self.Inbox.Work[NodeID]/REP[NodeID] for NodeID in range(NUM_NODES)])
                     MalNodeID = np.argmax(ScaledWork)
+                    self.Inbox.Packets[MalNodeID].sort(key=lambda p: p.Data.IssueTime)
                     if DROP_TYPE=='head':
                         packet = self.Inbox.Packets[MalNodeID][0] # Head drop
                     elif DROP_TYPE=='tail':
@@ -352,6 +372,11 @@ class Node:
                     self.Inbox.drop_packet(packet)
                     self.DroppedPackets[MalNodeID].append(packet)
                     packet.Data.Dropped = True
+
+                    if TIP_BLACKLIST and (MalNodeID not in self.TipBlacklist):
+                        self.TipBlacklist.append(MalNodeID)
+                        for tip in self.NodeTipsSet[MalNodeID]:
+                            self.remove_tip(tip)
 
     def prune(self, TxNode, NodeID, Forward):
         neighbID = self.Neighbours.index(TxNode)

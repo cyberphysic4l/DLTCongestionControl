@@ -9,6 +9,7 @@ class Message:
         self.IssueTime = IssueTime
         self.VisibleTime = VisibleTime
         self.Parents = Parents
+        self.DependentChildren = []
         self.Network = Network
         self.Index = Network.MsgIndex
         self.Milestone = Milestone
