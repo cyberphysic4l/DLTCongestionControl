@@ -122,7 +122,7 @@ def main():
         webbrowser.open('http://127.0.0.1:8050/')
         app.run_server(debug=False)
     else:
-        per_node_result_keys = ['Ready Lengths',
+        per_node_result_keys = ['AllReadyPackets',
                                 'Dropped Messages',
                                 'Number of Tips',
                                 'Number of Honest Tips',
@@ -135,7 +135,9 @@ def main():
                                 'Number of Unconfirmed Messages',
                                 'Number of Scheduled Messages',
                                 'Max Unconfirmed Message Age', 
-                                'Solidification Buffer Length']
+                                'Solidification Buffer Length',
+                                'ReadyPackets MalNeighb',
+                                'ReadyPackets NonMalNeighb']
         dirstr = os.path.dirname(os.path.realpath(__file__)) + '/results/'+ strftime("%Y-%m-%d_%H%M%S", gmtime())
         os.makedirs(dirstr, exist_ok=True)
         os.makedirs(dirstr+'/raw', exist_ok=True)
@@ -190,6 +192,11 @@ def simulate(per_node_result_keys, dirstr):
         ChannelDelays = 0.05*np.ones((NUM_NODES, NUM_NODES))+0.1*np.random.rand(NUM_NODES, NUM_NODES)
         AdjMatrix = np.multiply(1*np.asarray(nx.to_numpy_matrix(G)), ChannelDelays)
         Net = Network(AdjMatrix)
+        MalNeighb = Net.Nodes[2].Neighbours[0]
+        for i in range(len(MalNeighb.Neighbours)):
+            if MalNeighb.Neighbours[i] not in Net.Nodes[2].Neighbours and MalNeighb.Neighbours[i].NodeID!=2:
+                NonMalNeighb = MalNeighb.Neighbours[i]
+                break
         # output arrays
         for i in range(TimeSteps):
             if 100*i/TimeSteps%10==0:
@@ -211,7 +218,9 @@ def simulate(per_node_result_keys, dirstr):
                         OldestPacket = min(HonestPackets, key=lambda x: x.Data.IssueTime)
                         OldestTxAges[i,NodeID] = T - OldestPacket.Data.IssueTime
                 per_node_results['Inbox Lengths'][mc][i,NodeID] = len(Node.Inbox.AllPackets)
-                per_node_results['Ready Lengths'][mc][i,NodeID] = len(Node.Inbox.AllReadyPackets)
+                per_node_results['AllReadyPackets'][mc][i,NodeID] = len(Node.Inbox.AllReadyPackets)
+                per_node_results['ReadyPackets MalNeighb'][mc][i,NodeID] = len(MalNeighb.Inbox.ReadyPackets[NodeID])
+                per_node_results['ReadyPackets NonMalNeighb'][mc][i,NodeID] = len(NonMalNeighb.Inbox.ReadyPackets[NodeID])
                 per_node_results['Dropped Messages'][mc][i,NodeID] = sum([len(Node.DroppedPackets[i]) for i in range(NUM_NODES)])
                 if sum([len(n.DroppedPackets[NodeID]) for n in Net.Nodes]):
                     Droppees[NodeID] = sum([len(n.DroppedPackets[NodeID]) for n in Net.Nodes])
@@ -230,12 +239,12 @@ def simulate(per_node_result_keys, dirstr):
                 per_node_results['Solidification Buffer Length'][mc][i,NodeID] = len(Node.SolBuffer)
                 #if len(Node.SolBuffer)>100:
                     #print("Solidification issue")
-                if Node.UnconfMsgs:
+                '''if Node.UnconfMsgs:
                     OldestMsgIdx = min(Node.UnconfMsgs, key=lambda x: Node.UnconfMsgs[x].IssueTime)
                     age = T+STEP-Node.UnconfMsgs[OldestMsgIdx].IssueTime
                 else:
                     age = 0
-                per_node_results['Max Unconfirmed Message Age'][mc][i,NodeID] = age
+                per_node_results['Max Unconfirmed Message Age'][mc][i,NodeID] = age'''
         print("Simulation: "+str(mc+1) +"\t 100% Complete")
         OldestTxAge.append(np.mean(OldestTxAges, axis=1))
         for i in range(SIM_TIME):

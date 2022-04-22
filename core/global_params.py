@@ -2,10 +2,10 @@ import numpy as np
 
 # Simulation Parameters
 MONTE_CARLOS = 1
-SIM_TIME = 600
+SIM_TIME = 1200
 STEP = 0.01
 # Network Parameters
-NU = 10
+NU = 20
 NUM_NODES = 20
 NUM_NEIGHBOURS = 4
 START_TIMES = 10*np.ones(NUM_NODES)
@@ -54,14 +54,16 @@ DASH = False
 UPDATE_INTERVAL = 10
 
 # Tip selection
-L_MAX = 100
+L_MAX = 500
+OWN_TXS = True
+MAX_TIP_AGE = 30
 
 # Gossip optimisation
 PRUNING = False
 REDUNDANCY = 2
 
 # Confirmation type
-CONF_TYPE = 'CW'
+CONF_TYPE = 'Coo'
 ## Coordinator (Coo)
 MILESTONE_PERIOD = 10
 COO = 0

@@ -10,8 +10,10 @@ class Inbox:
         self.Node = Node
         self.AllPackets = [] # Inbox_m
         self.AllReadyPackets = []
+        self.AllNotReadyPackets = []
         self.Packets = [[] for NodeID in range(NUM_NODES)] # Inbox_m(i)
-        self.ReadyPackets = [[] for NodeID in range(NUM_NODES)] # Inbox_m(i)
+        self.ReadyPackets = [[] for NodeID in range(NUM_NODES)]
+        self.NotReadyPackets = [[] for NodeID in range(NUM_NODES)]
         self.Work = np.zeros(NUM_NODES)
         self.MsgIDs = []
         self.RRNodeID = np.random.randint(NUM_NODES) # start at a random node
@@ -26,13 +28,19 @@ class Inbox:
         Needs to be updated to only check when needed
         """
         for pkt in self.AllPackets:
-            if pkt not in self.AllReadyPackets and self.is_ready(pkt):
-                self.AllReadyPackets.append(pkt)
-                self.ReadyPackets[pkt.Data.NodeID].append(pkt)
+            if self.is_ready(pkt):
+                if pkt not in self.AllReadyPackets:
+                    self.AllReadyPackets.append(pkt)
+                    self.ReadyPackets[pkt.Data.NodeID].append(pkt)
+            else:
+                if pkt not in self.AllNotReadyPackets:
+                    self.AllNotReadyPackets.append(pkt)
+                    self.NotReadyPackets[pkt.Data.NodeID].append(pkt)
+            
         
     def is_ready(self, Pkt):
         for pID,p in Pkt.Data.Parents.items():
-            if not p.Eligible and not p.Confirmed:
+            if not p.Eligible:# and not p.Confirmed:
                 return False
         return True
     
@@ -54,13 +62,9 @@ class Inbox:
         if self.is_ready(Packet):
             self.AllReadyPackets.append(Packet)
             self.ReadyPackets[NodeID].append(Packet)
-
-        '''else:
-            for pID,p in Packet.Data.Parents.items():
-                if not p.Eligible and not p.Confirmed:
-                    if pID in self.DroppedPackets:
-                        p = self.DroppedPackets.pop(pID)
-                        self.Node.enqueue(p)'''
+        else:
+            self.AllNotReadyPackets.append(Packet)
+            self.NotReadyPackets[NodeID].append(Packet)
        
     def remove_packet(self, Packet):
         """
@@ -72,6 +76,9 @@ class Inbox:
                 if Packet in self.AllReadyPackets:
                     self.AllReadyPackets.remove(Packet)
                     self.ReadyPackets[Packet.Data.NodeID].remove(Packet)
+                if Packet in self.AllNotReadyPackets:
+                    self.AllNotReadyPackets.remove(Packet)
+                    self.NotReadyPackets[Packet.Data.NodeID].remove(Packet)
                 self.Packets[Packet.Data.NodeID].remove(Packet)
                 self.MsgIDs.remove(Packet.Data.Index)  
                 self.Work[Packet.Data.NodeID] -= Packet.Data.Work

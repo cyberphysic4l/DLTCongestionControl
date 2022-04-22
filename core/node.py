@@ -115,7 +115,7 @@ class Node:
     
     def select_tips(self, Time):
         """
-        Implements uniform random tip selection with/without fishing depending on param setting.
+        Implements uniform random tip selection
         """
         done = False
         while not done:
@@ -139,6 +139,7 @@ class Node:
         # sort inboxes by timestamp
         self.Inbox.AllPackets.sort(key=lambda p: p.Data.IssueTime)
         self.Inbox.AllReadyPackets.sort(key=lambda p: p.Data.IssueTime)
+        self.Inbox.AllNotReadyPackets.sort(key=lambda p: p.Data.IssueTime)
         for NodeID in range(NUM_NODES):
             self.Inbox.Packets[NodeID].sort(key=lambda p: p.Data.IssueTime)
         # process according to global rate Nu
@@ -172,13 +173,16 @@ class Node:
             else:
                 break
 
-    def update_tipsset(self, Msg):
+    def update_tipsset(self, Msg, Time):
         """
         Tip set manager
         """
-        
         self.Inbox.update_ready()
-        self.add_tip(Msg)
+        if OWN_TXS or Msg.NodeID!=self.NodeID or MODE[self.NodeID]>=3:
+            if MAX_TIP_AGE is None:
+                self.add_tip(Msg)
+            elif Time-Msg.IssueTime < MAX_TIP_AGE:
+                self.add_tip(Msg)
 
         # if this is a malicious nodes own message and ATK_TIP_RM_PARENTS is False, then don't remove the tips it selected as parents
         if MODE[self.NodeID]>=3 and Msg.NodeID==self.NodeID and not ATK_TIP_RM_PARENTS:
@@ -211,7 +215,7 @@ class Node:
         if CONF_TYPE=='Coo' and Msg.Milestone:
             Msg.mark_confirmed(self)
         Msg.Eligible = True
-        self.update_tipsset(Msg)
+        self.update_tipsset(Msg, Time)
         Msg.EligibleTime = Time
         # check if this message has dependent children that were dropped
         for childIndex in Msg.DependentChildren:
@@ -341,7 +345,7 @@ class Node:
                 '''
                 Buffer Management - if using tail drop, don't even add the packet if it is to be dropped.
                 ''' 
-                if sum(self.Inbox.Work)+Packet.Data.Work>MAX_BUFFER and DROP_TYPE=='tail':
+                '''if sum(self.Inbox.Work)+Packet.Data.Work>MAX_BUFFER and DROP_TYPE=='tail':
                     ScaledWork = np.array([self.Inbox.Work[NodeID]/REP[NodeID] for NodeID in range(NUM_NODES)])
                     MalNodeID = np.argmax(ScaledWork)
                     if MalNodeID==Packet.Data.NodeID:
@@ -350,6 +354,15 @@ class Node:
                             self.Inbox.drop_packet(Packet)
                             self.DroppedPackets[MalNodeID].append(Packet)
                             Packet.Data.Dropped = True
+                            return'''
+                for pID,p in Packet.Data.Parents.items():
+                    if not p.Eligible:# and not p.Confirmed:
+                        if pID in self.Inbox.DroppedPackets:
+                            self.Inbox.drop_packet(Packet)
+                            self.DroppedPackets[Packet.Data.NodeID].append(Packet)
+                            Packet.Data.Dropped = True
+                            pkt = self.Inbox.DroppedPackets.pop(pID)
+                            self.enqueue(pkt)
                             return
                 self.Inbox.add_packet(Packet)
                 self.ArrivalWorks.append(Packet.Data.Work)
@@ -364,11 +377,18 @@ class Node:
                 if sum(self.Inbox.Work)>MAX_BUFFER:
                     ScaledWork = np.array([self.Inbox.Work[NodeID]/REP[NodeID] for NodeID in range(NUM_NODES)])
                     MalNodeID = np.argmax(ScaledWork)
-                    self.Inbox.Packets[MalNodeID].sort(key=lambda p: p.Data.IssueTime)
-                    if DROP_TYPE=='head':
-                        packet = self.Inbox.Packets[MalNodeID][0] # Head drop
-                    elif DROP_TYPE=='tail':
-                        packet = self.Inbox.Packets[MalNodeID][-1] # Tail drop
+                    if self.Inbox.NotReadyPackets[MalNodeID]:
+                        self.Inbox.NotReadyPackets[MalNodeID].sort(key=lambda p: p.Data.IssueTime)
+                        if DROP_TYPE=='head':
+                            packet = self.Inbox.NotReadyPackets[MalNodeID][0] # Head drop
+                        elif DROP_TYPE=='tail':
+                            packet = self.Inbox.NotReadyPackets[MalNodeID][-1] # Tail drop
+                    else:
+                        self.Inbox.Packets[MalNodeID].sort(key=lambda p: p.Data.IssueTime)
+                        if DROP_TYPE=='head':
+                            packet = self.Inbox.Packets[MalNodeID][0] # Head drop
+                        elif DROP_TYPE=='tail':
+                            packet = self.Inbox.Packets[MalNodeID][-1] # Tail drop
                     self.Inbox.drop_packet(packet)
                     self.DroppedPackets[MalNodeID].append(packet)
                     packet.Data.Dropped = True
