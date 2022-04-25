@@ -196,9 +196,10 @@ class Node:
                     continue
 
         # check tip set size and remove oldest if too large. Malicious nodes don't prune tip set if ATK_MAX_SIZE is False.
-        if len(self.TipsSet)>L_MAX and not (MODE[self.NodeID]==3 and not ATK_TIP_MAX_SIZE):
-            oldestTip = min(self.TipsSet, key = lambda tip:tip.IssueTime)
-            self.remove_tip(oldestTip)
+        if L_MAX is not None:
+            if len(self.TipsSet)>L_MAX and not (MODE[self.NodeID]==3 and not ATK_TIP_MAX_SIZE):
+                oldestTip = min(self.TipsSet, key = lambda tip:tip.IssueTime)
+                self.remove_tip(oldestTip)
     
     def schedule(self, TxNode, Msg: Message, Time):
         assert self.NodeID in self.Network.InformedNodes[Msg.Index]
