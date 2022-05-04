@@ -26,8 +26,9 @@ def plot_cdf(data, xlabel: str, dirstr: str,  xlim=0):
             bins = np.arange(0, round(maxval*1/step), 1)*step
             pdf = np.zeros(len(bins))
             i = 0
-            if data[NodeID][0].size>1:
-                lats = sorted(data[NodeID][0])
+            if not isinstance(data[NodeID][0], int):
+                if data[NodeID][0].size>1:
+                    lats = sorted(data[NodeID][0])
             for lat in lats:
                 while i<len(bins):
                     if lat>bins[i]:

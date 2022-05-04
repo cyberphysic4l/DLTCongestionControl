@@ -35,7 +35,7 @@ class Message:
             self.EligibleTime = 0
         Network.MsgIndex += 1
 
-    def mark_confirmed(self, Node = None):
+    def mark_confirmed(self, Time, Node = None):
         self.Confirmed = True
         assert Node.NodeID in self.Network.ScheduledNodes[self.Index]
         assert not Node.NodeID in self.Network.ConfirmedNodes[self.Index]
@@ -43,11 +43,12 @@ class Message:
         if len(self.Network.ConfirmedNodes[self.Index])==NUM_NODES:
             self.Network.Nodes[self.NodeID].UnconfMsgs.pop(self.Index)
             self.Network.Nodes[self.NodeID].ConfMsgs[self.Index] = self
+            self.Network.ConfTimes[self.Index] = Time
         for _,p in self.Parents.items():
             if not p.Confirmed:
-                p.mark_confirmed(Node)
+                p.mark_confirmed(Time, Node)
     
-    def updateCW(self, Node, updateMsg=None, Work=None):
+    def updateCW(self, Time, Node, updateMsg=None, Work=None):
         if updateMsg is None:
             assert Work is None
             updateMsg = self
@@ -56,12 +57,12 @@ class Message:
             assert Work is not None
             self.CWeight += Work
             if self.CWeight >= CONF_WEIGHT:
-                self.mark_confirmed(Node)
+                self.mark_confirmed(Time, Node)
 
         self.LastCWUpdate = updateMsg
         for _,p in self.Parents.items():
             if not p.Confirmed and p.LastCWUpdate != updateMsg:
-                p.updateCW(Node, updateMsg, Work)
+                p.updateCW(Time, Node, updateMsg, Work)
     
     def copy(self, Node):
         Msg = copy(self)

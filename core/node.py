@@ -41,7 +41,6 @@ class Node:
         self.ServiceTimes = []
         self.ArrivalTimes = []
         self.ArrivalWorks = []
-        self.InboxLatencies = []
         self.DroppedPackets = [[] for NodeID in range(NUM_NODES)]
         self.MsgPool = []
         self.LastMilestoneTime = 0
@@ -161,8 +160,6 @@ class Node:
                 if Packet is not None:
                     self.schedule(Packet.TxNode, Packet.Data, nextSchedTime)
                     # update AIMD
-                    #if Packet.Data.NodeID==self.NodeID:
-                    self.Network.Nodes[Packet.Data.NodeID].InboxLatencies.append(nextSchedTime-Packet.EndTime)
                     self.Inbox.Avg = (1-W_Q)*self.Inbox.Avg + W_Q*sum([p.Data.Work for p in self.Inbox.Packets[self.NodeID]])
                     self.set_rate(nextSchedTime)
                     self.LastScheduleTime = nextSchedTime
@@ -211,10 +208,10 @@ class Node:
         assert not Msg.Eligible
         assert Msg.Index in self.Ledger
         if CONF_TYPE=='CW':
-            Msg.updateCW(self)
+            Msg.updateCW(Time, self)
         # if message is a milestone, mark its past cone as confirmed
         if CONF_TYPE=='Coo' and Msg.Milestone:
-            Msg.mark_confirmed(self)
+            Msg.mark_confirmed(Time, self)
         Msg.Eligible = True
         self.update_tipsset(Msg, Time)
         Msg.EligibleTime = Time

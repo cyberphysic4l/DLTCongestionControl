@@ -1,14 +1,14 @@
 import numpy as np
 
 # Simulation Parameters
-MONTE_CARLOS = 10
-SIM_TIME = 600
-STEP = 0.01
+MONTE_CARLOS = 20
+SIM_TIME = 60
+STEP = 0.001
 # Network Parameters
-NU = 20
+NU = 250
 NUM_NODES = 20
 NUM_NEIGHBOURS = 4
-START_TIMES = 10*np.ones(NUM_NODES)
+START_TIMES = 1*np.ones(NUM_NODES)
 GRAPH = 'regular'
 REPDIST = 'zipf'
 if REPDIST=='zipf':
@@ -21,10 +21,10 @@ elif REPDIST=='uniform':
     REP = np.ones(NUM_NODES, dtype=int)
 
 # Modes: 0 = inactive, 1 = content, 2 = best-effort, 3 = malicious
-#MODE = [3-(NodeID+1)%4 for NodeID in range(NUM_NODES)] # multiple malicious
-MODE = [2-(NodeID)%3 for NodeID in range(NUM_NODES)] # All honest
+MODE = [3-(NodeID+1)%4 for NodeID in range(NUM_NODES)] # multiple malicious
+#MODE = [2-(NodeID)%3 for NodeID in range(NUM_NODES)] # All honest
 #MODE = [1 for _ in range(NUM_NODES)] # All content (95%)
-MODE[2] = 3 # Make node 2 malicious
+#MODE[2] = 3 # Make node 2 malicious
 IOT = np.zeros(NUM_NODES)
 IOTLOW = 0.5
 IOTHIGH = 1
@@ -34,7 +34,7 @@ MAX_WORK = 1
 # Rate Setter
 ALPHA = 0.075
 BETA = 0.7
-TAU = 2
+TAU = 0.2
 MIN_TH = 1 # W
 MAX_TH = MIN_TH
 P_B = 0.5 # Not used if MAX_TH==MIN_TH
@@ -56,7 +56,7 @@ UPDATE_INTERVAL = 10
 # Tip selection
 L_MAX = None    # 'None' if no limit, otherwise max number of tips
 OWN_TXS = True  # Include own txs for tip selection
-MAX_TIP_AGE = 30
+MAX_TIP_AGE = 3
 
 # Gossip optimisation
 PRUNING = False

@@ -22,6 +22,7 @@ class Network:
         self.MsgDelays = {}
         self.VisMsgDelays = {}
         self.DissemTimes = {}
+        self.ConfTimes = {}
         self.MsgIssuer = {}
         Genesis = msg.Message(0, [], [], self)
         # Create nodes
@@ -64,9 +65,16 @@ class Network:
     
     def msg_latency(self, latencies, latTimes):
         for i,Msg in self.Nodes[0].Ledger.items():
-            if i in self.DissemTimes and Msg.IssueTime>20:
+            if i in self.DissemTimes and Msg.IssueTime>2*START_TIMES[0]:
                 latencies[Msg.NodeID].append(self.DissemTimes[i]-Msg.IssueTime)
                 latTimes[Msg.NodeID].append(self.DissemTimes[i])
+        return latencies, latTimes
+
+    def msg_conf_latency(self, latencies, latTimes):
+        for i,Msg in self.Nodes[0].Ledger.items():
+            if i in self.ConfTimes and Msg.IssueTime>2*START_TIMES[0]:
+                latencies[Msg.NodeID].append(self.ConfTimes[i]-Msg.IssueTime)
+                latTimes[Msg.NodeID].append(self.ConfTimes[i])
         return latencies, latTimes
 
 class CommChannel:
@@ -88,7 +96,8 @@ class CommChannel:
         Add new packet to the comm channel with time of arrival
         """
         self.Packets.append(Packet(TxNode, RxNode, Data, Time))
-        self.PacketDelays.append(np.random.normal(loc=self.Delay, scale=1/NU))
+        delay = max(0.01, np.random.normal(loc=self.Delay, scale=1/NU))
+        self.PacketDelays.append(delay)
     
     def transmit_packets(self, Time):
         """

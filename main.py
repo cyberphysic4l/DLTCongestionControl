@@ -165,13 +165,14 @@ def simulate(per_node_result_keys, dirstr):
     per_node_results = {}
     for k in per_node_result_keys:
         per_node_results[k] = [np.zeros((TimeSteps, NUM_NODES)) for mc in range(MONTE_CARLOS)]
-    MeanDelay = [np.zeros(SIM_TIME) for mc in range(MONTE_CARLOS)]
-    MeanVisDelay = [np.zeros(SIM_TIME) for mc in range(MONTE_CARLOS)]
+    MeanDelay = [np.zeros(int(TimeSteps/100)) for mc in range(MONTE_CARLOS)]
+    ConfDelay = [np.zeros(int(TimeSteps/100)) for mc in range(MONTE_CARLOS)]
     Unsolid = [np.zeros((TimeSteps, NUM_NODES)) for mc in range(MONTE_CARLOS)]
     EligibleDelays = [np.zeros((SIM_TIME, NUM_NODES)) for mc in range(MONTE_CARLOS)]
     latencies = [[] for NodeID in range(NUM_NODES)]
-    inboxLatencies = [[] for NodeID in range(NUM_NODES)]
+    confLatencies = [[] for NodeID in range(NUM_NODES)]
     latTimes = [[] for NodeID in range(NUM_NODES)]
+    confLatTimes = [[] for NodeID in range(NUM_NODES)]
     ServTimes = [[] for NodeID in range(NUM_NODES)]
     ArrTimes = [[] for NodeID in range(NUM_NODES)]
     interArrTimes = [[] for NodeID in range(NUM_NODES)]
@@ -247,13 +248,14 @@ def simulate(per_node_result_keys, dirstr):
                 per_node_results['Max Unconfirmed Message Age'][mc][i,NodeID] = age'''
         print("Simulation: "+str(mc+1) +"\t 100% Complete")
         OldestTxAge.append(np.mean(OldestTxAges, axis=1))
-        for i in range(SIM_TIME):
-            delays = [Net.MsgDelays[j] for j in Net.MsgDelays if int(Net.DissemTimes[j])==i and MODE[Net.MsgIssuer[j]]<3]
+        for i in range(int(TimeSteps/100)):
+            s = STEP*100
+            delays = [Net.MsgDelays[j] for j in Net.MsgDelays if s*int(Net.DissemTimes[j]/s)==i*s and MODE[Net.MsgIssuer[j]]<3]
             if delays:
                 MeanDelay[mc][i] = sum(delays)/len(delays)
-            visDelays = [Net.VisMsgDelays[j] for j in Net.VisMsgDelays.keys() if int(Net.DissemTimes[j])==i]
-            if visDelays:
-                MeanVisDelay[mc][i] = sum(visDelays)/len(visDelays)
+            confDelays = [Net.ConfTimes[j]-Net.Nodes[0].Ledger[j].IssueTime for j in Net.ConfTimes if s*int(Net.ConfTimes[j]/s)==i*s]
+            if confDelays:
+                ConfDelay[mc][i] = sum(confDelays)/len(confDelays)
         for NodeID in range(NUM_NODES):
             for i in range(SIM_TIME):
                 delays = []
@@ -268,9 +270,9 @@ def simulate(per_node_result_keys, dirstr):
             ArrTimes[NodeID] = sorted(Net.Nodes[NodeID].ArrivalTimes)
             ArrWorks = [x for _,x in sorted(zip(Net.Nodes[NodeID].ArrivalTimes,Net.Nodes[NodeID].ArrivalWorks))]
             interArrTimes[NodeID].extend(np.diff(ArrTimes[NodeID])/ArrWorks[1:])
-            inboxLatencies[NodeID].extend(Net.Nodes[NodeID].InboxLatencies)
                 
         latencies, latTimes = Net.msg_latency(latencies, latTimes)
+        confLatencies, confLatTimes = Net.msg_conf_latency(confLatencies, confLatTimes)
         
         del Net
     """
@@ -284,7 +286,7 @@ def simulate(per_node_result_keys, dirstr):
     avgPIT = sum(PacketsInTransit)/len(PacketsInTransit)
     avgLmds = sum(Lmds)/len(Lmds)
     avgMeanDelay = sum(MeanDelay)/len(MeanDelay)
-    avgMeanVisDelay = sum(MeanVisDelay)/len(MeanVisDelay)
+    avgConfDelay = sum(ConfDelay)/len(ConfDelay)
     avgUnsolid = sum(Unsolid)/len(Unsolid)
     avgEligibleDelays = sum(EligibleDelays)/len(EligibleDelays)
     avgOTA = sum(OldestTxAge)/len(OldestTxAge)
@@ -296,13 +298,13 @@ def simulate(per_node_result_keys, dirstr):
     for k in per_node_results:
         np.savetxt(dirstr+'/raw/' + k + '.csv', avg_per_node_results[k], delimiter=',')
     np.savetxt(dirstr+'/raw/avgMeanDelay.csv', avgMeanDelay, delimiter=',')
-    np.savetxt(dirstr+'/raw/avgMeanVisDelay.csv', avgMeanVisDelay, delimiter=',')
+    np.savetxt(dirstr+'/raw/avgConfDelay.csv', avgConfDelay, delimiter=',')
     np.savetxt(dirstr+'/raw/avgOldestTxAge.csv', avgOTA, delimiter=',')
     np.savetxt(dirstr+'/raw/avgUnsolid.csv', avgUnsolid, delimiter=',')
     np.savetxt(dirstr+'/raw/avgEligibleDelays.csv', avgEligibleDelays, delimiter=',')
     for NodeID in range(NUM_NODES):
-        np.savetxt(dirstr+'/raw/inboxLatencies'+str(NodeID)+'.csv',
-                   np.asarray(inboxLatencies[NodeID]), delimiter=',')
+        np.savetxt(dirstr+'/raw/confLatencies'+str(NodeID)+'.csv',
+                   np.asarray(confLatencies[NodeID]), delimiter=',')
         np.savetxt(dirstr+'/raw/latencies'+str(NodeID)+'.csv',
                    np.asarray(latencies[NodeID]), delimiter=',')
         np.savetxt(dirstr+'/raw/ServTimes'+str(NodeID)+'.csv',
@@ -331,10 +333,10 @@ def plot_results(dirstr, per_node_result_keys):
     avgUnsolid = np.loadtxt(dirstr+'/raw/avgUnsolid.csv', delimiter=',')
     avgEligibleDelays = np.loadtxt(dirstr+'/raw/avgEligibleDelays.csv', delimiter=',')
     avgMeanDelay = np.loadtxt(dirstr+'/raw/avgMeanDelay.csv', delimiter=',')
-    #avgMeanDelay = np.loadtxt(dirstr+'/avgMeanVisDelay.csv', delimiter=',')
+    avgConfDelay = np.loadtxt(dirstr+'/raw/avgConfDelay.csv', delimiter=',')
     avgOTA = np.loadtxt(dirstr+'/raw/avgOldestTxAge.csv', delimiter=',')
     latencies = []
-    #inboxLatencies = []
+    confLatencies = []
     ServTimes = []
     ArrTimes = []
     
@@ -344,13 +346,11 @@ def plot_results(dirstr, per_node_result_keys):
         else:
             lat = [0]
         latencies.append(lat)
-        '''
-        if os.stat(dirstr+'/InboxLatencies'+str(NodeID)+'.csv').st_size != 0:
-            inbLat = [np.loadtxt(dirstr+'/inboxLatencies'+str(NodeID)+'.csv', delimiter=',')]
+        if os.stat(dirstr+'/raw/confLatencies'+str(NodeID)+'.csv').st_size != 0:
+            confLat = [np.loadtxt(dirstr+'/raw/confLatencies'+str(NodeID)+'.csv', delimiter=',')]
         else:
-            inbLat = [0]
-        inboxLatencies.append(inbLat)
-        '''
+            confLat = [0]
+        confLatencies.append(confLat)
         ServTimes.append([np.loadtxt(dirstr+'/raw/ServTimes'+str(NodeID)+'.csv', delimiter=',')])
         ArrTimes.append([np.loadtxt(dirstr+'/raw/ArrTimes'+str(NodeID)+'.csv', delimiter=',')])
     """
@@ -362,22 +362,43 @@ def plot_results(dirstr, per_node_result_keys):
     fig2, ax2 = plt.subplots(figsize=(8,4))
     ax2.grid(linestyle='--')
     ax2.set_xlabel('Time (sec)')
-    HonestTP = sum(avgTP[1000:,NodeID] for NodeID in range(NUM_NODES))# if MODE[NodeID]<3)
+    HonestTP = sum(avgTP[avg_window:,NodeID] for NodeID in range(NUM_NODES))# if MODE[NodeID]<3)
     MaxHonestTP = NU#*sum([rep for i,rep in enumerate(REP) if MODE[i]<3])/sum(REP)
-    ax2.plot(np.arange(10, SIM_TIME, STEP), 100*HonestTP/MaxHonestTP, color = 'black')
+    ax2.plot(np.arange(avg_window*STEP, SIM_TIME, STEP), 100*HonestTP/MaxHonestTP, color = 'black')
     ax22 = ax2.twinx()
-    ax22.plot(np.arange(0, SIM_TIME, 1), avgMeanDelay, color='tab:gray')    
+    ax22.plot(np.arange(0, SIM_TIME, STEP*100), avgMeanDelay, color='tab:gray')    
     ax2.tick_params(axis='y', labelcolor='black')
     ax22.tick_params(axis='y', labelcolor='tab:gray')
     ax2.set_ylabel(r'$DR/\nu \quad (\%)$', color='black')
     ax2.set_ylim([0,110])
-    ax22.set_ylabel('Mean Latency (sec)', color='tab:gray')
+    ax22.set_ylabel('Dissemination Latency (sec)', color='tab:gray')
     #ax22.set_ylim([0,2])
     fig2.tight_layout()
     plt.savefig(dirstr+'/plots/Throughput.png', bbox_inches='tight')
+
+    avg_window = 1000
+    data = per_node_results['Number of Confirmed Messages']
+    avgTP = np.concatenate((np.zeros((avg_window, NUM_NODES)),(data[avg_window:,:]-data[:-avg_window,:])))/(avg_window*STEP)
+    fig2, ax2 = plt.subplots(figsize=(8,4))
+    ax2.grid(linestyle='--')
+    ax2.set_xlabel('Time (sec)')
+    HonestTP = sum(avgTP[avg_window:,NodeID] for NodeID in range(NUM_NODES))# if MODE[NodeID]<3)
+    MaxHonestTP = NU#*sum([rep for i,rep in enumerate(REP) if MODE[i]<3])/sum(REP)
+    ax2.plot(np.arange(avg_window*STEP, SIM_TIME, STEP), 100*HonestTP/MaxHonestTP, color = 'black')
+    ax22 = ax2.twinx()
+    ax22.plot(np.arange(0, SIM_TIME, STEP*100), avgConfDelay, color='tab:gray')
+    ax2.tick_params(axis='y', labelcolor='black')
+    ax22.tick_params(axis='y', labelcolor='tab:gray')
+    ax2.set_ylabel(r'$CR/\nu \quad (\%)$', color='black')
+    ax2.set_ylim([0,110])
+    ax22.set_ylabel('Confirmation Latency (sec)', color='tab:gray')
+    #ax22.set_ylim([0,2])
+    fig2.tight_layout()
+    plt.savefig(dirstr+'/plots/ConfThroughput.png', bbox_inches='tight')
     
 
     plot_cdf(latencies, 'Latency (sec)', dirstr+'/plots/Latency.png')
+    plot_cdf(confLatencies, 'Confrimation Latency (sec)', dirstr+'/plots/ConfLatency.png')
 
     #per_node_plot(avgLmds, 'Time (sec)', r'$\lambda_i$', '', dirstr, avg_window=1)
     
