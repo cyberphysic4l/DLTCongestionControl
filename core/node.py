@@ -49,6 +49,7 @@ class Node:
         self.SolBuffer = {}
         self.MissingParentIDs = {}
         self.TipBlacklist = []
+        self.TipsSetDelay = []
         
     def issue_msgs(self, Time):
         """
@@ -62,7 +63,7 @@ class Node:
             times = np.sort(np.random.uniform(Time, Time+STEP, np.random.poisson(STEP*self.LambdaD/Work)))
             for t in times:
                 Parents = {}
-                self.MsgPool.append(Message(t, Parents, self, self.Network, Work=Work))
+                self.MsgPool.append(Message(t, Parents, self, self.Network, Virtual=True, Work=Work))
 
         if MODE[self.NodeID]<3:
             if self.BackOff:
@@ -175,11 +176,15 @@ class Node:
         Tip set manager
         """
         self.Inbox.update_ready()
+        
         if OWN_TXS or Msg.NodeID!=self.NodeID or MODE[self.NodeID]>=3:
-            if MAX_TIP_AGE is None:
-                self.add_tip(Msg)
-            elif Time-Msg.IssueTime < MAX_TIP_AGE:
-                self.add_tip(Msg)
+            if MODE[self.NodeID]<3 or ATK_OWN_TXS:
+                if MAX_TIP_AGE is None:
+                    self.add_tip(Msg)
+                elif Time-Msg.IssueTime < MAX_TIP_AGE:
+                    if Time>20:
+                        self.TipsSetDelay.append(Time-Msg.IssueTime)
+                    self.add_tip(Msg)
 
         # if this is a malicious nodes own message and ATK_TIP_RM_PARENTS is False, then don't remove the tips it selected as parents
         if MODE[self.NodeID]>=3 and Msg.NodeID==self.NodeID and not ATK_TIP_RM_PARENTS:

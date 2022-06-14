@@ -40,8 +40,17 @@ class Message:
         assert Node.NodeID in self.Network.ScheduledNodes[self.Index]
         assert not Node.NodeID in self.Network.ConfirmedNodes[self.Index]
         self.Network.ConfirmedNodes[self.Index].append(Node.NodeID)
-        if len(self.Network.ConfirmedNodes[self.Index])==NUM_NODES:
-            self.Network.Nodes[self.NodeID].UnconfMsgs.pop(self.Index)
+        if MODE[Node.NodeID]<3: # only count this as first confirmation if the node is honest
+            if self.Index not in self.Network.FirstConfTimes:
+                self.Network.FirstConfTimes[self.Index] = Time
+            else:
+                if self.Network.FirstConfTimes[self.Index]>Time:
+                    self.Network.FirstConfTimes[self.Index] = Time
+        if all(x in self.Network.ConfirmedNodes[self.Index] for x in self.Network.HonestNodes):
+            if self.Index in self.Network.FirstConfTimes:
+                del self.Network.FirstConfTimes[self.Index]
+            if self.Index in self.Network.Nodes[self.NodeID].UnconfMsgs:
+                del self.Network.Nodes[self.NodeID].UnconfMsgs[self.Index]
             self.Network.Nodes[self.NodeID].ConfMsgs[self.Index] = self
             self.Network.ConfTimes[self.Index] = Time
         for _,p in self.Parents.items():
@@ -57,7 +66,10 @@ class Message:
             assert Work is not None
             self.CWeight += Work
             if self.CWeight >= CONF_WEIGHT:
-                self.mark_confirmed(Time, Node)
+                if MAX_CONF_AGE is None:
+                    self.mark_confirmed(Time, Node)
+                elif (Time-self.IssueTime)<MAX_CONF_AGE:
+                    self.mark_confirmed(Time, Node)
 
         self.LastCWUpdate = updateMsg
         for _,p in self.Parents.items():

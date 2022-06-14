@@ -12,7 +12,7 @@ import sys
 from time import gmtime, strftime
 from core.global_params import *
 from core.network import Network, Packet
-from utils import all_node_plot, per_node_barplot, per_node_plot, per_node_plotly_plot, plot_cdf, per_node_rate_plot, scaled_rate_plot
+from utils import all_node_plot, per_node_barplot, per_node_plot, per_node_plot_mean, per_node_plotly_plot, plot_cdf, plot_cdf_exp, plot_cdf_weib, per_node_rate_plot, scaled_rate_plot
 import plotly.express as px
 import plotly.graph_objects as go
 import dash
@@ -111,8 +111,6 @@ def update_line_chart(*args):
     lambdad = 'Total desired Lambda = ' + str(100*sum([Node.LambdaD for Node in Net.Nodes])/NU) + '%'
 
     return fig_out, n_updates_out, lambdad
-
-np.random.seed(0)
     
 def main():
     '''
@@ -133,8 +131,7 @@ def main():
                                 'Number of Undisseminated Messages',
                                 'Number of Confirmed Messages',
                                 'Number of Unconfirmed Messages',
-                                'Number of Scheduled Messages',
-                                'Max Unconfirmed Message Age', 
+                                'Number of Scheduled Messages', 
                                 'Solidification Buffer Length',
                                 'ReadyPackets MalNeighb',
                                 'ReadyPackets NonMalNeighb']
@@ -144,6 +141,7 @@ def main():
         os.makedirs(dirstr+'/plots', exist_ok=True)
         shutil.copy("core/global_params.py", dirstr+"/global_params.txt")
         per_node_result_keys = simulate(per_node_result_keys, dirstr)
+        #dirstr = os.path.dirname(os.path.realpath(__file__)) + '/results/2022-05-12_151328'
         plot_results(dirstr, per_node_result_keys)
     
 def simulate(per_node_result_keys, dirstr):
@@ -151,7 +149,7 @@ def simulate(per_node_result_keys, dirstr):
     Setup simulation inputs and instantiate output arrays
     """
     # seed rng
-    np.random.seed(0)
+    np.random.seed(1)
     TimeSteps = int(SIM_TIME/STEP)
     
     """
@@ -161,6 +159,7 @@ def simulate(per_node_result_keys, dirstr):
     Lmds = [np.zeros((TimeSteps, NUM_NODES)) for mc in range(MONTE_CARLOS)]
     OldestTxAges = np.zeros((TimeSteps, NUM_NODES))
     OldestTxAge = []
+    OldestUnconfAge = [np.zeros(TimeSteps) for mc in range(MONTE_CARLOS)]
     Droppees = {}
     per_node_results = {}
     for k in per_node_result_keys:
@@ -176,6 +175,7 @@ def simulate(per_node_result_keys, dirstr):
     ServTimes = [[] for NodeID in range(NUM_NODES)]
     ArrTimes = [[] for NodeID in range(NUM_NODES)]
     interArrTimes = [[] for NodeID in range(NUM_NODES)]
+    h_latency = [[] for NodeID in range(NUM_NODES)]
     for mc in range(MONTE_CARLOS):
         """
         Generate network topology:
@@ -209,15 +209,22 @@ def simulate(per_node_result_keys, dirstr):
             and runs the simulation for a time step
             """
             Net.simulate(T)
+            ages = [T-fc for _,fc in Net.FirstConfTimes.items()]
+            if ages:
+                OldestUnconfAge[mc][i] = max(ages)
+            else:
+                OldestUnconfAge[mc][i] = 0
             # save summary results in output arrays
             PacketsInTransit[mc][i] = sum([sum([len(cc.Packets) for cc in ccs]) for ccs in Net.CommChannels])
             for NodeID, Node in enumerate(Net.Nodes):
                 Lmds[mc][i, NodeID] = min(Node.Lambda, Node.LambdaD)
+                """
                 if Node.Inbox.AllPackets and MODE[NodeID]<3: #don't include malicious nodes
                     HonestPackets = [p for p in Node.Inbox.AllPackets if MODE[p.Data.NodeID]<3]
                     if HonestPackets:
                         OldestPacket = min(HonestPackets, key=lambda x: x.Data.IssueTime)
                         OldestTxAges[i,NodeID] = T - OldestPacket.Data.IssueTime
+                """
                 per_node_results['Inbox Lengths'][mc][i,NodeID] = len(Node.Inbox.AllPackets)
                 per_node_results['AllReadyPackets'][mc][i,NodeID] = len(Node.Inbox.AllReadyPackets)
                 per_node_results['ReadyPackets MalNeighb'][mc][i,NodeID] = len(MalNeighb.Inbox.ReadyPackets[NodeID])
@@ -240,13 +247,8 @@ def simulate(per_node_result_keys, dirstr):
                 per_node_results['Solidification Buffer Length'][mc][i,NodeID] = len(Node.SolBuffer)
                 #if len(Node.SolBuffer)>100:
                     #print("Solidification issue")
-                '''if Node.UnconfMsgs:
-                    OldestMsgIdx = min(Node.UnconfMsgs, key=lambda x: Node.UnconfMsgs[x].IssueTime)
-                    age = T+STEP-Node.UnconfMsgs[OldestMsgIdx].IssueTime
-                else:
-                    age = 0
-                per_node_results['Max Unconfirmed Message Age'][mc][i,NodeID] = age'''
         print("Simulation: "+str(mc+1) +"\t 100% Complete")
+        
         OldestTxAge.append(np.mean(OldestTxAges, axis=1))
         for i in range(int(TimeSteps/100)):
             s = STEP*100
@@ -270,10 +272,11 @@ def simulate(per_node_result_keys, dirstr):
             ArrTimes[NodeID] = sorted(Net.Nodes[NodeID].ArrivalTimes)
             ArrWorks = [x for _,x in sorted(zip(Net.Nodes[NodeID].ArrivalTimes,Net.Nodes[NodeID].ArrivalWorks))]
             interArrTimes[NodeID].extend(np.diff(ArrTimes[NodeID])/ArrWorks[1:])
+            h_latency[NodeID].extend(Net.Nodes[NodeID].TipsSetDelay)
                 
         latencies, latTimes = Net.msg_latency(latencies, latTimes)
         confLatencies, confLatTimes = Net.msg_conf_latency(confLatencies, confLatTimes)
-        
+
         del Net
     """
     Get results
@@ -290,6 +293,7 @@ def simulate(per_node_result_keys, dirstr):
     avgUnsolid = sum(Unsolid)/len(Unsolid)
     avgEligibleDelays = sum(EligibleDelays)/len(EligibleDelays)
     avgOTA = sum(OldestTxAge)/len(OldestTxAge)
+    avgOUA = sum(OldestUnconfAge)/len(OldestUnconfAge)
     """
     Create a directory for these results and save them
     """
@@ -300,6 +304,7 @@ def simulate(per_node_result_keys, dirstr):
     np.savetxt(dirstr+'/raw/avgMeanDelay.csv', avgMeanDelay, delimiter=',')
     np.savetxt(dirstr+'/raw/avgConfDelay.csv', avgConfDelay, delimiter=',')
     np.savetxt(dirstr+'/raw/avgOldestTxAge.csv', avgOTA, delimiter=',')
+    np.savetxt(dirstr+'/raw/avgOldestUnconfAge.csv', avgOUA, delimiter=',')
     np.savetxt(dirstr+'/raw/avgUnsolid.csv', avgUnsolid, delimiter=',')
     np.savetxt(dirstr+'/raw/avgEligibleDelays.csv', avgEligibleDelays, delimiter=',')
     for NodeID in range(NUM_NODES):
@@ -307,6 +312,8 @@ def simulate(per_node_result_keys, dirstr):
                    np.asarray(confLatencies[NodeID]), delimiter=',')
         np.savetxt(dirstr+'/raw/latencies'+str(NodeID)+'.csv',
                    np.asarray(latencies[NodeID]), delimiter=',')
+        np.savetxt(dirstr+'/raw/h_latency'+str(NodeID)+'.csv',
+                   np.asarray(h_latency[NodeID]), delimiter=',')
         np.savetxt(dirstr+'/raw/ServTimes'+str(NodeID)+'.csv',
                    np.asarray(ServTimes[NodeID]), delimiter=',')
         np.savetxt(dirstr+'/raw/ArrTimes'+str(NodeID)+'.csv',
@@ -335,7 +342,9 @@ def plot_results(dirstr, per_node_result_keys):
     avgMeanDelay = np.loadtxt(dirstr+'/raw/avgMeanDelay.csv', delimiter=',')
     avgConfDelay = np.loadtxt(dirstr+'/raw/avgConfDelay.csv', delimiter=',')
     avgOTA = np.loadtxt(dirstr+'/raw/avgOldestTxAge.csv', delimiter=',')
+    avgOUA = np.loadtxt(dirstr+'/raw/avgOldestUnconfAge.csv', delimiter=',')
     latencies = []
+    h_latency = []
     confLatencies = []
     ServTimes = []
     ArrTimes = []
@@ -351,6 +360,11 @@ def plot_results(dirstr, per_node_result_keys):
         else:
             confLat = [0]
         confLatencies.append(confLat)
+        if os.stat(dirstr+'/raw/h_latency'+str(NodeID)+'.csv').st_size != 0:
+            lat = [np.loadtxt(dirstr+'/raw/h_latency'+str(NodeID)+'.csv', delimiter=',')]
+        else:
+            lat = [0]
+        h_latency.append(lat)
         ServTimes.append([np.loadtxt(dirstr+'/raw/ServTimes'+str(NodeID)+'.csv', delimiter=',')])
         ArrTimes.append([np.loadtxt(dirstr+'/raw/ArrTimes'+str(NodeID)+'.csv', delimiter=',')])
     """
@@ -384,28 +398,32 @@ def plot_results(dirstr, per_node_result_keys):
     ax2.set_xlabel('Time (sec)')
     HonestTP = sum(avgTP[avg_window:,NodeID] for NodeID in range(NUM_NODES))# if MODE[NodeID]<3)
     MaxHonestTP = NU#*sum([rep for i,rep in enumerate(REP) if MODE[i]<3])/sum(REP)
-    ax2.plot(np.arange(avg_window*STEP, SIM_TIME, STEP), 100*HonestTP/MaxHonestTP, color = 'black')
+    pc = 100*HonestTP/MaxHonestTP
+    ax2.plot(np.arange(avg_window*STEP, SIM_TIME, STEP), pc, color = 'black')
     ax22 = ax2.twinx()
     ax22.plot(np.arange(0, SIM_TIME, STEP*100), avgConfDelay, color='tab:gray')
     ax2.tick_params(axis='y', labelcolor='black')
     ax22.tick_params(axis='y', labelcolor='tab:gray')
     ax2.set_ylabel(r'$CR/\nu \quad (\%)$', color='black')
-    ax2.set_ylim([0,110])
+    ax2.set_ylim([0,1.05*max(pc)])
     ax22.set_ylabel('Confirmation Latency (sec)', color='tab:gray')
-    #ax22.set_ylim([0,2])
+    ax22.set_ylim([0,2*max(avgConfDelay)])
     fig2.tight_layout()
     plt.savefig(dirstr+'/plots/ConfThroughput.png', bbox_inches='tight')
     
 
     plot_cdf(latencies, 'Latency (sec)', dirstr+'/plots/Latency.png')
     plot_cdf(confLatencies, 'Confrimation Latency (sec)', dirstr+'/plots/ConfLatency.png')
+    
+    plot_cdf(h_latency, r'$H$ (sec)', dirstr+'/plots/H_latency_cdf.png')
+    plot_cdf_exp(h_latency, r'$H$ (sec)', dirstr+'/plots/H_latency_cdf_exp.png')
 
     #per_node_plot(avgLmds, 'Time (sec)', r'$\lambda_i$', '', dirstr, avg_window=1)
     
     for k in per_node_results:
         per_node_plot(per_node_results[k], 'Time (sec)', k, '', dirstr, avg_window=100)
-
-    
+    k = 'Number of Tips'
+    per_node_plot_mean(per_node_results[k], 'Time (sec)', k, '', dirstr, avg_window=100)
     scaled_rate_plot(per_node_results['Number of Disseminated Messages'], 'Time (sec)', 'Dissemination Rate', '', dirstr)
     scaled_rate_plot(per_node_results['Number of Confirmed Messages'], 'Time (sec)', 'Confirmation Rate', '', dirstr)
     scaled_rate_plot(per_node_results['Number of Scheduled Messages'], 'Time (sec)', 'Scheduling Rate', '', dirstr)
@@ -418,11 +436,12 @@ def plot_results(dirstr, per_node_result_keys):
     per_node_plot(avgUnsolid, 'Time (sec)', 'Unsolid', '', dirstr)
     
     per_node_barplot(REP, 'Node ID', 'Reputation', 'Reputation Distribution', dirstr+'/plots/RepDist.png')
-    per_node_barplot(QUANTUM, 'Node ID', 'Quantum', 'Quantum Distribution', dirstr+'/plots/QDist.png')
+    #per_node_barplot(QUANTUM, 'Node ID', 'Quantum', 'Quantum Distribution', dirstr+'/plots/QDist.png')
 
     all_node_plot(per_node_results['Number of Unconfirmed Messages'].sum(axis=1), 'Time (sec)', 'Number of Unconfirmed Messages', '', dirstr+'/plots/AllUnconfirmed.png')
     all_node_plot(avgPIT, 'Time (sec)', 'Number of packets in transit', '', dirstr+'/plots/PIT.png')
     all_node_plot(avgOTA, 'Time (sec)', 'Max time in transit (sec)', '', dirstr+'/plots/MaxAge.png')
+    all_node_plot(avgOUA, 'Time (sec)', 'Max time partially confirmed (sec)', '', dirstr+'/plots/MaxUnconfAge.png')
 
     """
     fig5a, ax5a = plt.subplots(figsize=(8,4))

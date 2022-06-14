@@ -14,6 +14,7 @@ class Network:
         self.InformedNodes = {0: [NodeID for NodeID in range(NUM_NODES)]}
         self.ScheduledNodes = {0: [NodeID for NodeID in range(NUM_NODES)]}
         self.ConfirmedNodes = {0: [NodeID for NodeID in range(NUM_NODES)]}
+        self.HonestNodes = [NodeID for NodeID in range(NUM_NODES) if MODE[NodeID]<3]
         self.Nodes = []
         self.CommChannels = []
         self.Disseminated = [0 for NodeID in range(NUM_NODES)]
@@ -22,7 +23,8 @@ class Network:
         self.MsgDelays = {}
         self.VisMsgDelays = {}
         self.DissemTimes = {}
-        self.ConfTimes = {}
+        self.FirstConfTimes = {}
+        self.ConfTimes = {0: 0}
         self.MsgIssuer = {}
         Genesis = msg.Message(0, [], [], self)
         # Create nodes

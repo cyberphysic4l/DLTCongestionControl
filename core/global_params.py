@@ -1,8 +1,8 @@
 import numpy as np
 
 # Simulation Parameters
-MONTE_CARLOS = 20
-SIM_TIME = 60
+MONTE_CARLOS = 1
+SIM_TIME = 120
 STEP = 0.001
 # Network Parameters
 NU = 250
@@ -21,10 +21,10 @@ elif REPDIST=='uniform':
     REP = np.ones(NUM_NODES, dtype=int)
 
 # Modes: 0 = inactive, 1 = content, 2 = best-effort, 3 = malicious
-MODE = [3-(NodeID+1)%4 for NodeID in range(NUM_NODES)] # multiple malicious
-#MODE = [2-(NodeID)%3 for NodeID in range(NUM_NODES)] # All honest
+#MODE = [3-(NodeID+1)%4 for NodeID in range(NUM_NODES)] # multiple malicious
+MODE = [2-(NodeID)%3 for NodeID in range(NUM_NODES)] # All honest
 #MODE = [1 for _ in range(NUM_NODES)] # All content (95%)
-#MODE[2] = 3 # Make node 2 malicious
+MODE[2] = 3 # Make node 2 malicious
 IOT = np.zeros(NUM_NODES)
 IOTLOW = 0.5
 IOTHIGH = 1
@@ -63,15 +63,17 @@ PRUNING = False
 REDUNDANCY = 2
 
 # Confirmation type
-CONF_TYPE = 'CW'
+CONF_TYPE = 'Coo'
 ## Coordinator (Coo)
 MILESTONE_PERIOD = 10
 COO = 0
 ## Cumulative Weight (CW)
 CONF_WEIGHT = 200
+MAX_CONF_AGE = None
 
 # Attacker details
 ## Tip selection
+ATK_OWN_TXS = True
 ATK_TIP_MAX_SIZE = True
 ATK_TIP_RM_PARENTS = True
 ## forwarding behaviour

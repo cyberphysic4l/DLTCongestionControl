@@ -60,23 +60,93 @@ def plot_cdf(data, xlabel: str, dirstr: str,  xlim=0):
         ModeLines = [Line2D([0],[0],color='tab:blue', lw=4), Line2D([0],[0],color='tab:red', lw=4)]
         ax.legend(ModeLines, ['Content','Best-effort'], loc='lower right')
     plt.savefig(dirstr, bbox_inches='tight')
-    
-def plot_cdf_exp(data, ax):
+
+def plot_cdf_exp(data, xlabel: str, dirstr: str,  xlim=0):
+    _, ax = plt.subplots(figsize=(8,4))
+    ax.grid(linestyle='--')
+    ax.set_xlabel(xlabel)
     step = STEP/10
     maxval = 0
     for NodeID in range(NUM_NODES):
-        if len(data[NodeID][0])>0:
-            val = np.max(data[NodeID][0])
-        else:
-            val = 0
+        val = np.max(data[NodeID][0])
         if val>maxval:
             maxval = val
-    for NodeID in range(len(data)):
+    maxval = max(maxval, xlim)
+    Lines = [[] for NodeID in range(NUM_NODES)]
+    mal = False
+    iot = False
+    h = []
+    for NodeID in range(NUM_NODES):
+        bins = np.arange(0, round(maxval*1/step), 1)*step
+        pdf = np.zeros(len(bins))
+        i = 0
+        if not isinstance(data[NodeID][0], int):
+            if data[NodeID][0].size>1:
+                lats = sorted(data[NodeID][0])
+        for lat in lats:
+            while i<len(bins):
+                if lat>=bins[i]:
+                    i += 1
+                else:
+                    break
+            pdf[i-1] += 1
+        pdf = pdf/sum(pdf) # normalise
+        cdf = np.cumsum(pdf)
+        if IOT[NodeID]:
+            iot = True
+            marker = 'x'
+        else:
+            marker = None
+        if MODE[NodeID]==0:
+            Lines[NodeID] = ax.plot(bins, cdf, color='tab:gray', linewidth=4*REP[NodeID]/REP[0], marker=marker, markevery=0.1)
+        if MODE[NodeID]==1:
+            Lines[NodeID] = ax.plot(bins, cdf, color='tab:blue', linewidth=4*REP[NodeID]/REP[0], marker=marker, markevery=0.1)
+        if MODE[NodeID]==2:
+            Lines[NodeID] = ax.plot(bins, cdf, color='tab:red', linewidth=4*REP[NodeID]/REP[0], marker=marker, markevery=0.1)
+        if MODE[NodeID]==3:
+            mal = True
+            Lines[NodeID] = ax.plot(bins, cdf, color='tab:green', linewidth=4*REP[NodeID]/REP[0], marker=marker, markevery=0.1)
+        h.append(np.mean(data[NodeID][0]))
+    h = sum(h)/len(h)
+    h0 = h-0.5
+    h1 = h+0.5
+    mu = 1/h
+    if mal:
+        ModeLines = [Line2D([0],[0],color='tab:gray', lw=4), Line2D([0],[0],color='tab:blue', lw=4), Line2D([0],[0],color='tab:red', lw=4), Line2D([0],[0],color='tab:green', lw=4), Line2D([0],[0],color='black', lw=1, linestyle='dashdot'), Line2D([0],[0],color='black', lw=1, linestyle='dashed'), Line2D([0],[0],color='black', lw=1, linestyle='dotted')]
+        ax.legend(ModeLines, ['Inactive', 'Content','Best-effort', 'Malicious', 'Exponential CDF', 'Uniform CDF', r'$h=\mu^{-1}=$'+"{:.2f}".format(h)], loc='lower right')
+    elif iot:
+        ModeLines = [Line2D([0],[0],color='tab:blue'), Line2D([0],[0],color='tab:red'), Line2D([0],[0],color='tab:blue', marker='x'), Line2D([0],[0],color='tab:red', marker='x')]
+        ax.legend(ModeLines, ['Content value node','Best-effort value node', 'Content IoT node', 'Best-effort IoT node'], loc='lower right')
+    else:
+        ModeLines = [Line2D([0],[0],color='tab:gray', lw=4), Line2D([0],[0],color='tab:blue', lw=4), Line2D([0],[0],color='tab:red', lw=4), Line2D([0],[0],color='black', lw=1, linestyle='dashdot'), Line2D([0],[0],color='black', lw=1, linestyle='dashed'), Line2D([0],[0],color='black', lw=1, linestyle='dotted')]
+        ax.legend(ModeLines, ['Inactive', 'Content','Best-effort', 'Exponential CDF', 'Uniform CDF', r'$h=\mu^{-1}=$'+"{:.2f}".format(h)], loc='lower right')
+    ax.plot(bins, np.ones(len(bins))-np.exp(-mu*bins), color='black', linestyle='dashdot')
+    ax.plot([0,h0,h1,bins[-1]], [0,0,1,1],  color='black', linestyle='dashed')
+    ax.axvline(h, color='black', linestyle='dotted')
+    plt.savefig(dirstr, bbox_inches='tight')
+
+def plot_cdf_weib(data, k, xlabel: str, dirstr: str,  xlim=0):
+    _, ax = plt.subplots(figsize=(8,4))
+    ax.grid(linestyle='--')
+    ax.set_xlabel(xlabel)
+    step = STEP/10
+    maxval = 0
+    for NodeID in range(NUM_NODES):
+        val = np.max(data[NodeID][0])
+        if val>maxval:
+            maxval = val
+    maxval = max(maxval, xlim)
+    Lines = [[] for NodeID in range(NUM_NODES)]
+    mal = False
+    iot = False
+    for NodeID in range(NUM_NODES):
         if MODE[NodeID]>0:
             bins = np.arange(0, round(maxval*1/step), 1)*step
             pdf = np.zeros(len(bins))
             i = 0
-            lats = sorted(data[NodeID][0])
+            if not isinstance(data[NodeID][0], int):
+                if data[NodeID][0].size>1:
+                    lats = sorted(data[NodeID][0])
             for lat in lats:
                 while i<len(bins):
                     if lat>bins[i]:
@@ -86,15 +156,31 @@ def plot_cdf_exp(data, ax):
                 pdf[i-1] += 1
             pdf = pdf/sum(pdf) # normalise
             cdf = np.cumsum(pdf)
-            ax.plot(bins, cdf, color='tab:red')
+            if IOT[NodeID]:
+                iot = True
+                marker = 'x'
+            else:
+                marker = None
+            if MODE[NodeID]==1:
+                Lines[NodeID] = ax.plot(bins, cdf, color='tab:blue', linewidth=4*REP[NodeID]/REP[0], marker=marker, markevery=0.1)
+            if MODE[NodeID]==2:
+                Lines[NodeID] = ax.plot(bins, cdf, color='tab:red', linewidth=4*REP[NodeID]/REP[0], marker=marker, markevery=0.1)
+            if MODE[NodeID]==3:
+                mal = True
+                Lines[NodeID] = ax.plot(bins, cdf, color='tab:green', linewidth=4*REP[NodeID]/REP[0], marker=marker, markevery=0.1)
+    if mal:
+        ModeLines = [Line2D([0],[0],color='tab:red', lw=4), Line2D([0],[0],color='tab:blue', lw=4), Line2D([0],[0],color='tab:green', lw=4)]
+        ax.legend(ModeLines, ['Best-effort', 'Content','Malicious'], loc='lower right')
+    elif iot:
+        ModeLines = [Line2D([0],[0],color='tab:blue'), Line2D([0],[0],color='tab:red'), Line2D([0],[0],color='tab:blue', marker='x'), Line2D([0],[0],color='tab:red', marker='x')]
+        ax.legend(ModeLines, ['Content value node','Best-effort value node', 'Content IoT node', 'Best-effort IoT node'], loc='lower right')
+    else:
+        ModeLines = [Line2D([0],[0],color='tab:blue', lw=4), Line2D([0],[0],color='tab:red', lw=4), Line2D([0],[0],color='black', lw=1, linestyle='dashed')]
+        ax.legend(ModeLines, ['Content','Best-effort', r'$1-e^{(\mu t)^k}$'], loc='lower right')
     lmd = np.mean(data[1][0])
-    ax.axvline(lmd, linestyle='--', color='tab:red')
-    
-    ax.set_title('rho = ' + str(1/(lmd*NU)))
-    ax.plot(bins, np.ones(len(bins))-np.exp(-(1/lmd)*bins), color='black')
-    #ax.plot(bins, np.ones(len(bins))-np.exp(-0.95*NU*bins), linestyle='--', color='tab:red')
-    ModeLines = [Line2D([0],[0],color='tab:red', lw=2), Line2D([0],[0],linestyle='--',color='black', lw=2)]
-    ax.legend(ModeLines, ['Measured',r'$1-e^{-\lambda t}$'], loc='lower right')
+    ax.plot(bins, np.ones(len(bins))-1/(np.exp(np.power((1/lmd)*bins,k))), color='black', linestyle='dashed')
+    plt.savefig(dirstr, bbox_inches='tight')
+    print(lmd)
 
 
 def plot_ratesetter_comp(dir1, dir2, dir3):
@@ -188,6 +274,7 @@ def per_node_barplot(data, xlabel: str, ylabel: str, title: str, dirstr: str, le
     ax.set_xlabel(xlabel)
     ax.title.set_text(title)
     ax.set_ylabel(ylabel)
+    ax.set_xticks([0,5,10,15])
     if modes is None:
         modes = list(set(MODE))
     mode_names = ['Inactive', 'Content','Best-effort', 'Malicious', 'Multi-rate']
@@ -218,6 +305,32 @@ def per_node_plot(data: np.ndarray, xlabel: str, ylabel: str, title: str, dirstr
     ModeLines = [Line2D([0],[0],color=colors[mode], lw=4) for mode in modes]
     if len(modes)>1:
         fig.legend(ModeLines, [mode_names[i] for i in modes], loc=legend_loc)
+
+    plt.figtext(0.5, 0.01, figtxt, wrap=True, horizontalalignment='center', fontsize=12)
+    plt.savefig(dirstr+'/plots/'+ylabel+'.png', bbox_inches='tight')
+
+def per_node_plot_mean(data: np.ndarray, xlabel: str, ylabel: str, title: str, dirstr: str, avg_window: int = 100, legend_loc: str = 'right', modes = None, step=STEP, figtxt = ''):
+    fig, ax = plt.subplots(figsize=(8,4))
+    ax.grid(linestyle='--')
+    ax.set_xlabel(xlabel)
+    ax.set_ylabel(ylabel)
+    ax.title.set_text(title)
+
+    avg = np.mean(data[int(20/STEP):,0])
+
+    if modes is None:
+        modes = list(set(MODE))
+    mode_names = ['Inactive', 'Content','Best-effort', 'Malicious', 'Multi-rate']
+    colors = ['tab:gray', 'tab:blue', 'tab:red', 'tab:green', 'tab:olive']
+    for NodeID in range(NUM_NODES):
+        if MODE[NodeID] in modes and np.any(data[:, NodeID]):
+            ax.plot(np.arange((avg_window-1)*step, SIM_TIME, step), np.convolve(np.ones(avg_window)/avg_window, data[:,NodeID], 'valid'), color=colors[MODE[NodeID]])
+    ax.axhline(avg, color='black', linestyle='dotted')
+    ax.set_xlim(0, SIM_TIME)
+    ModeLines = [Line2D([0],[0],color=colors[mode], lw=4) for mode in modes]
+    ModeLines.append(Line2D([0],[0],color='black', linestyle='dotted'))
+    if len(modes)>1:
+        fig.legend(ModeLines, [mode_names[i] for i in modes]+[r'$L=$'+'{:03d}'.format(int(avg))], loc=legend_loc)
 
     plt.figtext(0.5, 0.01, figtxt, wrap=True, horizontalalignment='center', fontsize=12)
     plt.savefig(dirstr+'/plots/'+ylabel+'.png', bbox_inches='tight')
