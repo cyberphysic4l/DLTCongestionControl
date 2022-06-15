@@ -2,7 +2,7 @@ import numpy as np
 
 # Simulation Parameters
 MONTE_CARLOS = 1
-SIM_TIME = 120
+SIM_TIME = 60
 STEP = 0.001
 # Network Parameters
 NU = 250
@@ -24,18 +24,18 @@ elif REPDIST=='uniform':
 #MODE = [3-(NodeID+1)%4 for NodeID in range(NUM_NODES)] # multiple malicious
 MODE = [2-(NodeID)%3 for NodeID in range(NUM_NODES)] # All honest
 #MODE = [1 for _ in range(NUM_NODES)] # All content (95%)
-MODE[2] = 3 # Make node 2 malicious
+#MODE[2] = 3 # Make node 2 malicious
 IOT = np.zeros(NUM_NODES)
 IOTLOW = 0.5
 IOTHIGH = 1
-MAX_WORK = 1
+MAX_WORK = 10
 
 # Congestion Control Parameters
 # Rate Setter
 ALPHA = 0.075
 BETA = 0.7
 TAU = 0.2
-MIN_TH = 1 # W
+MIN_TH = 0.1 # W
 MAX_TH = MIN_TH
 P_B = 0.5 # Not used if MAX_TH==MIN_TH
 W_Q = 0.1 # for exponential moving average of inbox length measurement
@@ -78,3 +78,6 @@ ATK_TIP_MAX_SIZE = True
 ATK_TIP_RM_PARENTS = True
 ## forwarding behaviour
 ATK_RAND_FORWARD = False
+
+# Virtual Blocks
+V_MSG_TIME = 0.001

@@ -5,7 +5,7 @@ class Message:
     """
     Object to simulate a transaction and its edges in the DAG
     """
-    def __init__(self, IssueTime, Parents, Node, Network, Work=0, Index=None, VisibleTime=None, Milestone=False):
+    def __init__(self, IssueTime, Parents, Node, Network, Virtual, Work=0, Index=None, VisibleTime=None, Milestone=False):
         self.IssueTime = IssueTime
         self.VisibleTime = VisibleTime
         self.Parents = Parents
@@ -34,6 +34,7 @@ class Message:
             self.Confirmed = True
             self.EligibleTime = 0
         Network.MsgIndex += 1
+        self.Virtual = Virtual
 
     def mark_confirmed(self, Time, Node = None):
         self.Confirmed = True

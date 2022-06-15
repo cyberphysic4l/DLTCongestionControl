@@ -26,7 +26,7 @@ class Network:
         self.FirstConfTimes = {}
         self.ConfTimes = {0: 0}
         self.MsgIssuer = {}
-        Genesis = msg.Message(0, [], [], self)
+        Genesis = msg.Message(0, [], [], self, Virtual=False)
         # Create nodes
         for i in range(np.size(self.A,1)):
             self.Nodes.append(node.Node(self, i, Genesis))

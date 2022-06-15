@@ -50,10 +50,12 @@ class Node:
         self.MissingParentIDs = {}
         self.TipBlacklist = []
         self.TipsSetDelay = []
+        self.LastVMTime = 0
+        self.WorkCounter = 0
         
     def issue_msgs(self, Time):
         """
-        Create new msgs at rate lambda
+        Create new msgs for message pool at rate lambda
         """
         if self.LambdaD:
             if IOT[self.NodeID]:
@@ -63,41 +65,61 @@ class Node:
             times = np.sort(np.random.uniform(Time, Time+STEP, np.random.poisson(STEP*self.LambdaD/Work)))
             for t in times:
                 Parents = {}
-                self.MsgPool.append(Message(t, Parents, self, self.Network, Virtual=True, Work=Work))
-
-        if MODE[self.NodeID]<3:
+                self.MsgPool.append(Message(t, Parents, self, self.Network, Virtual=False, Work=Work))
+        '''
+        Create new virtual blocks at rate lambda as well.
+        '''
+        if MODE[self.NodeID]==1 or MODE[self.NodeID]==2:
             if self.BackOff:
-                self.LastIssueTime += TAU#BETA*REP[self.NodeID]/self.Lambda
-            while Time+STEP >= self.LastIssueTime + self.LastIssueWork/self.Lambda and self.MsgPool:
-                OldestMsgTime = self.MsgPool[0].IssueTime
-                if OldestMsgTime>Time+STEP:
-                    break
-                self.LastIssueTime = max(OldestMsgTime, self.LastIssueTime+self.LastIssueWork/self.Lambda)
-                Msg = self.MsgPool.pop(0)
-                Msg.Parents = self.select_tips(Time)
-                Msg.IssueTime = self.LastIssueTime
-                self.LastIssueWork = Msg.Work
-                self.IssuedMsgs.append(Msg)
-        else:
+                self.LastVMTime += TAU # pause for tau seconds
+            if Time>self.LastVMTime and Time%V_MSG_TIME<STEP:
+                Work = self.Lambda*V_MSG_TIME
+                assert Work<=MAX_WORK
+                vMsg = Message(Time, {}, self, self.Network, Virtual=True, Work=Work)
+                p = net.Packet(self, self, vMsg, Time)
+                p.EndTime = Time
+                self.LastVMTime = Time
+                self.enqueue(p, Time)
+
+
+        if MODE[self.NodeID]>=3: #avoid virtual blocks, just schedule right away.
             Work = 1
             times = np.sort(np.random.uniform(Time, Time+STEP, np.random.poisson(STEP*self.Lambda/Work)))
             for t in times:
                 Parents = self.select_tips(Time)
-                self.IssuedMsgs.append(Message(t, Parents, self, self.Network, Work=Work))
-                
-        # Issue the messages
-        while self.IssuedMsgs:
-            Msg = self.IssuedMsgs.pop(0)
-            p = net.Packet(self, self, Msg, Msg.IssueTime)
-            p.EndTime = Msg.IssueTime
-            if self.NodeID==COO and Msg.IssueTime>=self.LastMilestoneTime+MILESTONE_PERIOD:
-                Msg.Milestone = True
-                self.LastMilestoneTime += MILESTONE_PERIOD
-            self.UnconfMsgs[Msg.Index] = Msg
-            self.solidify(p, Msg.IssueTime) # solidify then book this message
-            if MODE[self.NodeID]==3: # malicious don't consider own msgs for scheduling
+                assert all([p.IssueTime<t for _,p in Parents.items()])
+                Msg = Message(t, Parents, self, self.Network, Virtual=False, Work=Work)
+                p = net.Packet(self, self, Msg, Msg.IssueTime)
+                p.EndTime = Msg.IssueTime
+                if self.NodeID==COO and Msg.IssueTime>=self.LastMilestoneTime+MILESTONE_PERIOD:
+                    Msg.Milestone = True
+                    self.LastMilestoneTime += MILESTONE_PERIOD
+                self.UnconfMsgs[Msg.Index] = Msg
+                self.solidify(p, Msg.IssueTime) # solidify then book this message
                 self.schedule(self, Msg, Msg.IssueTime)
     
+    def message_factory(self, virtualMsg, Time):
+        assert virtualMsg.Virtual
+        self.WorkCounter += virtualMsg.Work
+        if self.MsgPool:
+            while self.WorkCounter >= self.MsgPool[0].Work:
+                Msg = self.MsgPool.pop(0)
+                Msg.Parents = self.select_tips(Time)
+                assert all([p.IssueTime<Time for _,p in Msg.Parents.items()])
+                Msg.IssueTime = Time
+                p = net.Packet(self, self, Msg, Msg.IssueTime)
+                p.EndTime = Msg.IssueTime
+                if self.NodeID==COO and Msg.IssueTime>=self.LastMilestoneTime+MILESTONE_PERIOD:
+                    Msg.Milestone = True
+                    self.LastMilestoneTime += MILESTONE_PERIOD
+                self.UnconfMsgs[Msg.Index] = Msg
+                self.solidify(p, Msg.IssueTime) # solidify then book this message
+                self.schedule(self, Msg, Msg.IssueTime)
+                self.WorkCounter -= Msg.Work
+                Time+=1e-6
+                if not self.MsgPool:
+                    break
+
     def add_tip(self, tip):
         """
         Adds tip to the tips set
@@ -162,10 +184,10 @@ class Node:
                     self.schedule(Packet.TxNode, Packet.Data, nextSchedTime)
                     # update AIMD
                     self.Inbox.Avg = (1-W_Q)*self.Inbox.Avg + W_Q*sum([p.Data.Work for p in self.Inbox.Packets[self.NodeID]])
-                    self.set_rate(nextSchedTime)
                     self.LastScheduleTime = nextSchedTime
                     self.LastScheduleWork = Packet.Data.Work
                     self.ServiceTimes.append(nextSchedTime)
+                    self.set_rate(nextSchedTime)
                 else:
                     break
             else:
@@ -203,30 +225,33 @@ class Node:
                 oldestTip = min(self.TipsSet, key = lambda tip:tip.IssueTime)
                 self.remove_tip(oldestTip)
     
-    def schedule(self, TxNode, Msg: Message, Time):
-        assert self.NodeID in self.Network.InformedNodes[Msg.Index]
-        assert not self.NodeID in self.Network.ScheduledNodes[Msg.Index]
-        self.Network.ScheduledNodes[Msg.Index].append(self.NodeID)
-        if len(self.Network.ScheduledNodes[Msg.Index])==NUM_NODES:
-            self.Network.Scheduled[Msg.NodeID] += 1
-        # add to eligible set
-        assert not Msg.Eligible
-        assert Msg.Index in self.Ledger
-        if CONF_TYPE=='CW':
-            Msg.updateCW(Time, self)
-        # if message is a milestone, mark its past cone as confirmed
-        if CONF_TYPE=='Coo' and Msg.Milestone:
-            Msg.mark_confirmed(Time, self)
-        Msg.Eligible = True
-        self.update_tipsset(Msg, Time)
-        Msg.EligibleTime = Time
-        # check if this message has dependent children that were dropped
-        for childIndex in Msg.DependentChildren:
-            if childIndex in self.Inbox.DroppedPackets:
-                Packet = self.Inbox.DroppedPackets.pop(childIndex)
-                self.enqueue(Packet)
-        # broadcast the packet
-        self.forward(TxNode, Msg, Time)
+    def schedule(self, TxNode, Msg, Time):
+        if Msg.Virtual:
+            self.message_factory(Msg, Time)
+        else:
+            assert self.NodeID in self.Network.InformedNodes[Msg.Index]
+            assert not self.NodeID in self.Network.ScheduledNodes[Msg.Index]
+            self.Network.ScheduledNodes[Msg.Index].append(self.NodeID)
+            if len(self.Network.ScheduledNodes[Msg.Index])==NUM_NODES:
+                self.Network.Scheduled[Msg.NodeID] += 1
+            # add to eligible set
+            assert not Msg.Eligible
+            assert Msg.Index in self.Ledger
+            if CONF_TYPE=='CW':
+                Msg.updateCW(Time, self)
+            # if message is a milestone, mark its past cone as confirmed
+            if CONF_TYPE=='Coo' and Msg.Milestone:
+                Msg.mark_confirmed(Time, self)
+            Msg.Eligible = True
+            self.update_tipsset(Msg, Time)
+            Msg.EligibleTime = Time
+            # check if this message has dependent children that were dropped
+            for childIndex in Msg.DependentChildren:
+                if childIndex in self.Inbox.DroppedPackets:
+                    Packet = self.Inbox.DroppedPackets.pop(childIndex)
+                    self.enqueue(Packet)
+            # broadcast the packet
+            self.forward(TxNode, Msg, Time)
 
     def forward(self, TxNode, Msg, Time):
         """
@@ -301,8 +326,7 @@ class Node:
             self.Undissem += 1
             self.UndissemWork += Msg.Work
             Msg.VisibleTime = Time
-            if MODE[self.NodeID]>=3:
-                return # don't enqueue own messages if malicious
+            return # don't enqueue own messages
 
         self.enqueue(Packet, Time)
     
@@ -333,7 +357,7 @@ class Node:
                     self.BackOff = False
                     self.LastBackOff = Time
                 else:
-                    self.Lambda += self.Alpha
+                    self.Lambda += self.Alpha*self.LastScheduleWork
             elif MODE[self.NodeID]<3: #honest active
                 self.Lambda = NU*REP[self.NodeID]/sum(REP)
             else: # malicious
@@ -344,20 +368,22 @@ class Node:
         Add to inbox if not already in inbox or already eligible
         """
         if Packet.Data not in self.Inbox.MsgIDs:
-            if not Packet.Data.Eligible:
-                '''
-                Buffer Management - if using tail drop, don't even add the packet if it is to be dropped.
-                ''' 
-                '''if sum(self.Inbox.Work)+Packet.Data.Work>MAX_BUFFER and DROP_TYPE=='tail':
-                    ScaledWork = np.array([self.Inbox.Work[NodeID]/REP[NodeID] for NodeID in range(NUM_NODES)])
-                    MalNodeID = np.argmax(ScaledWork)
-                    if MalNodeID==Packet.Data.NodeID:
-                        newestPacket = self.Inbox.Packets[MalNodeID][-1]
-                        if Packet.Data.IssueTime>newestPacket.Data.IssueTime:
-                            self.Inbox.drop_packet(Packet)
-                            self.DroppedPackets[MalNodeID].append(Packet)
-                            Packet.Data.Dropped = True
-                            return'''
+            if isinstance(Packet.Data, Message):
+                assert not Packet.Data.Eligible
+            '''
+            Buffer Management - if using tail drop, don't even add the packet if it is to be dropped.
+            ''' 
+            '''if sum(self.Inbox.Work)+Packet.Data.Work>MAX_BUFFER and DROP_TYPE=='tail':
+                ScaledWork = np.array([self.Inbox.Work[NodeID]/REP[NodeID] for NodeID in range(NUM_NODES)])
+                MalNodeID = np.argmax(ScaledWork)
+                if MalNodeID==Packet.Data.NodeID:
+                    newestPacket = self.Inbox.Packets[MalNodeID][-1]
+                    if Packet.Data.IssueTime>newestPacket.Data.IssueTime:
+                        self.Inbox.drop_packet(Packet)
+                        self.DroppedPackets[MalNodeID].append(Packet)
+                        Packet.Data.Dropped = True
+                        return'''
+            if isinstance(Packet.Data, Message):
                 for pID,p in Packet.Data.Parents.items():
                     if not p.Eligible:# and not p.Confirmed:
                         if pID in self.Inbox.DroppedPackets:
@@ -367,39 +393,40 @@ class Node:
                             pkt = self.Inbox.DroppedPackets.pop(pID)
                             self.enqueue(pkt)
                             return
-                self.Inbox.add_packet(Packet)
-                self.ArrivalWorks.append(Packet.Data.Work)
-                if Time is not None: # Time is none if we are re-adding a dropped packet
-                    self.ArrivalTimes.append(Time)
-                    if Packet.Data.NodeID==self.NodeID:
-                        #self.Inbox.Avg = (1-W_Q)*self.Inbox.Avg + W_Q*len(self.Inbox.Packets[self.NodeID])
-                        self.check_congestion()
-                '''
-                Buffer Management
-                '''                
-                if sum(self.Inbox.Work)>MAX_BUFFER:
-                    ScaledWork = np.array([self.Inbox.Work[NodeID]/REP[NodeID] for NodeID in range(NUM_NODES)])
-                    MalNodeID = np.argmax(ScaledWork)
-                    if self.Inbox.NotReadyPackets[MalNodeID]:
-                        self.Inbox.NotReadyPackets[MalNodeID].sort(key=lambda p: p.Data.IssueTime)
-                        if DROP_TYPE=='head':
-                            packet = self.Inbox.NotReadyPackets[MalNodeID][0] # Head drop
-                        elif DROP_TYPE=='tail':
-                            packet = self.Inbox.NotReadyPackets[MalNodeID][-1] # Tail drop
-                    else:
-                        self.Inbox.Packets[MalNodeID].sort(key=lambda p: p.Data.IssueTime)
-                        if DROP_TYPE=='head':
-                            packet = self.Inbox.Packets[MalNodeID][0] # Head drop
-                        elif DROP_TYPE=='tail':
-                            packet = self.Inbox.Packets[MalNodeID][-1] # Tail drop
-                    self.Inbox.drop_packet(packet)
-                    self.DroppedPackets[MalNodeID].append(packet)
-                    packet.Data.Dropped = True
+            self.Inbox.add_packet(Packet)
+            self.ArrivalWorks.append(Packet.Data.Work)
+            if Time is not None: # Time is none if we are re-adding a dropped packet
+                self.ArrivalTimes.append(Time)
+                if Packet.Data.NodeID==self.NodeID:
+                    #self.Inbox.Avg = (1-W_Q)*self.Inbox.Avg + W_Q*len(self.Inbox.Packets[self.NodeID])
+                    self.check_congestion()
+            '''
+            Buffer Management
+            '''                
+            if sum(self.Inbox.Work)>MAX_BUFFER:
+                ScaledWork = np.array([self.Inbox.Work[NodeID]/REP[NodeID] for NodeID in range(NUM_NODES)])
+                MalNodeID = np.argmax(ScaledWork)
+                assert MalNodeID!=self.NodeID
+                if self.Inbox.NotReadyPackets[MalNodeID]:
+                    self.Inbox.NotReadyPackets[MalNodeID].sort(key=lambda p: p.Data.IssueTime)
+                    if DROP_TYPE=='head':
+                        packet = self.Inbox.NotReadyPackets[MalNodeID][0] # Head drop
+                    elif DROP_TYPE=='tail':
+                        packet = self.Inbox.NotReadyPackets[MalNodeID][-1] # Tail drop
+                else:
+                    self.Inbox.Packets[MalNodeID].sort(key=lambda p: p.Data.IssueTime)
+                    if DROP_TYPE=='head':
+                        packet = self.Inbox.Packets[MalNodeID][0] # Head drop
+                    elif DROP_TYPE=='tail':
+                        packet = self.Inbox.Packets[MalNodeID][-1] # Tail drop
+                self.Inbox.drop_packet(packet)
+                self.DroppedPackets[MalNodeID].append(packet)
+                packet.Data.Dropped = True
 
-                    if TIP_BLACKLIST and (MalNodeID not in self.TipBlacklist):
-                        self.TipBlacklist.append(MalNodeID)
-                        for tip in self.NodeTipsSet[MalNodeID]:
-                            self.remove_tip(tip)
+                if TIP_BLACKLIST and (MalNodeID not in self.TipBlacklist):
+                    self.TipBlacklist.append(MalNodeID)
+                    for tip in self.NodeTipsSet[MalNodeID]:
+                        self.remove_tip(tip)
 
     def prune(self, TxNode, NodeID, Forward):
         neighbID = self.Neighbours.index(TxNode)

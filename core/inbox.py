@@ -22,6 +22,7 @@ class Inbox:
         self.Avg = 0
         self.RequestedMsgIDs = []
         self.DroppedPackets = {}
+        self.RequiredRounds = [MAX_WORK for _ in range(NUM_NODES)]
 
     def update_ready(self):
         """
@@ -39,6 +40,8 @@ class Inbox:
             
         
     def is_ready(self, Pkt):
+        if Pkt.Data.Virtual:
+            return True
         for pID,p in Pkt.Data.Parents.items():
             if not p.Eligible:# and not p.Confirmed:
                 return False
@@ -121,10 +124,24 @@ class Inbox:
     def drr_ready_schedule(self, Time):
         if self.Scheduled:
             return self.Scheduled.pop(0)
-        
+        n_iter = 0
+        # precalculate next scheduled packet and increment all deficits at once to this point.
+        self.RequiredRounds = [1e6 for _ in range(NUM_NODES)]
+        for NodeID in range(NUM_NODES):
+            if self.ReadyPackets[NodeID]:
+                for p in self.ReadyPackets[NodeID]:
+                    if p.EndTime<=Time:
+                        self.RequiredRounds[NodeID] = max(0,int((p.Data.Work-self.Deficit[NodeID])/QUANTUM[NodeID]))
+                        break
+        rounds = min(self.RequiredRounds)
+        self.Deficit = [max(self.Deficit[NodeID]+rounds*QUANTUM[NodeID],MAX_WORK) for NodeID in range(NUM_NODES)]
+
         while self.AllReadyPackets and not self.Scheduled:
             if self.Deficit[self.RRNodeID]<MAX_WORK:
                 self.Deficit[self.RRNodeID] += QUANTUM[self.RRNodeID]
+            if self.RequiredRounds[self.RRNodeID]>rounds:
+                self.RRNodeID = (self.RRNodeID+1)%NUM_NODES
+                continue # don't bother checking all packets if this is not the next one to be scheduled.
             i = 0
             while self.ReadyPackets[self.RRNodeID] and i<len(self.ReadyPackets[self.RRNodeID]):
                 Packet = self.ReadyPackets[self.RRNodeID][i]
@@ -138,6 +155,7 @@ class Inbox:
                     i += 1
                     continue
             self.RRNodeID = (self.RRNodeID+1)%NUM_NODES
+            n_iter += 1
         if self.Scheduled:
             return self.Scheduled.pop(0) 
                     
