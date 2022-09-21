@@ -1,11 +1,13 @@
 import numpy as np
 
 # Simulation Parameters
-MONTE_CARLOS = 20
-SIM_TIME = 60
+MONTE_CARLOS = 1
+SIM_TIME = 120
 STEP = 0.001
+#TRAFFIC_PROFILE = np.random.randint(80, 110, (10,))/100.0
+TRAFFIC_PROFILE = np.array([0.5,1.5,0.5,1.5,0.5,1.5,0.5,1.5,0.5,1.5])
 # Network Parameters
-NU = 250
+NU = 25
 NUM_NODES = 20
 NUM_NEIGHBOURS = 4
 START_TIMES = 1*np.ones(NUM_NODES)
@@ -21,9 +23,10 @@ elif REPDIST=='uniform':
     REP = np.ones(NUM_NODES, dtype=int)
 
 # Modes: 0 = inactive, 1 = content, 2 = best-effort, 3 = malicious
-MODE = [3-(NodeID+1)%4 for NodeID in range(NUM_NODES)] # multiple malicious
+#MODE = [3-(NodeID+1)%4 for NodeID in range(NUM_NODES)] # multiple malicious
 #MODE = [2-(NodeID)%3 for NodeID in range(NUM_NODES)] # All honest
-#MODE = [1 for _ in range(NUM_NODES)] # All content (95%)
+MODE = [1 for _ in range(NUM_NODES)] # All content
+#MODE = [2 for _ in range(NUM_NODES)] # All best effort
 #MODE[2] = 3 # Make node 2 malicious
 IOT = np.zeros(NUM_NODES)
 IOTLOW = 0.5
@@ -41,7 +44,7 @@ P_B = 0.5 # Not used if MAX_TH==MIN_TH
 W_Q = 0.1 # for exponential moving average of inbox length measurement
 
 # Scheduler
-SCHEDULING = 'drr_ready'
+SCHEDULING = 'manaburn'
 QUANTUM = [MAX_WORK*rep/sum(REP) for rep in REP]
 
 # Buffer Manager
@@ -56,7 +59,7 @@ UPDATE_INTERVAL = 10
 # Tip selection
 L_MAX = None    # 'None' if no limit, otherwise max number of tips
 OWN_TXS = True  # Include own txs for tip selection
-MAX_TIP_AGE = 3
+MAX_TIP_AGE = None
 
 # Gossip optimisation
 PRUNING = False
@@ -68,7 +71,7 @@ CONF_TYPE = 'CW'
 MILESTONE_PERIOD = 10
 COO = 0
 ## Cumulative Weight (CW)
-CONF_WEIGHT = 200
+CONF_WEIGHT = 100
 
 # Attacker details
 ## Tip selection
@@ -76,3 +79,7 @@ ATK_TIP_MAX_SIZE = True
 ATK_TIP_RM_PARENTS = True
 ## forwarding behaviour
 ATK_RAND_FORWARD = False
+
+# Mana Burn
+# anxious, noburn, greedy
+BURN_POLICY = 'anxious'

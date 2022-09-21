@@ -147,3 +147,12 @@ class Inbox:
             # remove the message from all inboxes
             self.remove_packet(Packet)
             return Packet
+
+    def priority_schedule(self, Time):
+        # queue is already sorted by priority
+        for i in range(len(self.AllReadyPackets)):
+            Packet = self.AllReadyPackets[i]
+            if Packet.EndTime<=Time:
+                # remove the message from all inboxes
+                self.remove_packet(Packet)
+                return Packet

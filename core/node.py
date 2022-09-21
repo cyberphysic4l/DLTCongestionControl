@@ -23,12 +23,7 @@ class Node:
         self.NodeID = NodeID
         self.Alpha = ALPHA*REP[NodeID]/sum(REP)
         self.Lambda = NU*REP[NodeID]/sum(REP)
-        if MODE[NodeID]==0:
-            self.LambdaD = 0
-        elif MODE[NodeID]==1:
-            self.LambdaD = 0.95*self.Lambda
-        else:
-            self.LambdaD = 5*self.Lambda # higher than it will be allowed
+        self.LambdaD = 0
         self.BackOff = []
         self.LastBackOff = []
         self.LastScheduleTime = 0
@@ -49,6 +44,7 @@ class Node:
         self.SolBuffer = {}
         self.MissingParentIDs = {}
         self.TipBlacklist = []
+        self.Mana = [0 for _ in range(NUM_NODES)]
         
     def issue_msgs(self, Time):
         """
@@ -61,10 +57,14 @@ class Node:
                 Work = 1
             times = np.sort(np.random.uniform(Time, Time+STEP, np.random.poisson(STEP*self.LambdaD/Work)))
             for t in times:
-                Parents = {}
-                self.MsgPool.append(Message(t, Parents, self, self.Network, Work=Work))
+                if SCHEDULING=='manaburn' or MODE[self.NodeID]==1:
+                    Parents = self.select_tips(Time)
+                    self.IssuedMsgs.append(Message(t, Parents, self, self.Network, Work=Work))
+                else:
+                    Parents = {}
+                    self.MsgPool.append(Message(t, Parents, self, self.Network, Work=Work))
 
-        if MODE[self.NodeID]<3:
+        if MODE[self.NodeID]==2 and SCHEDULING!='manaburn':
             if self.BackOff:
                 self.LastIssueTime += TAU#BETA*REP[self.NodeID]/self.Lambda
             while Time+STEP >= self.LastIssueTime + self.LastIssueWork/self.Lambda and self.MsgPool:
@@ -77,7 +77,7 @@ class Node:
                 Msg.IssueTime = self.LastIssueTime
                 self.LastIssueWork = Msg.Work
                 self.IssuedMsgs.append(Msg)
-        else:
+        elif MODE[self.NodeID]>=3:
             Work = 1
             times = np.sort(np.random.uniform(Time, Time+STEP, np.random.poisson(STEP*self.Lambda/Work)))
             for t in times:
@@ -87,6 +87,11 @@ class Node:
         # Issue the messages
         while self.IssuedMsgs:
             Msg = self.IssuedMsgs.pop(0)
+            if SCHEDULING=='manaburn':
+                if BURN_POLICY=='anxious':
+                    Msg.Burn = self.Mana[self.NodeID]
+                    self.Mana[self.NodeID] = 0
+                
             p = net.Packet(self, self, Msg, Msg.IssueTime)
             p.EndTime = Msg.IssueTime
             if self.NodeID==COO and Msg.IssueTime>=self.LastMilestoneTime+MILESTONE_PERIOD:
@@ -135,12 +140,16 @@ class Node:
         """
         schedule msgs from inbox at a fixed deterministic rate NU
         """
-        # sort inboxes by timestamp
-        self.Inbox.AllPackets.sort(key=lambda p: p.Data.IssueTime)
-        self.Inbox.AllReadyPackets.sort(key=lambda p: p.Data.IssueTime)
-        self.Inbox.AllNotReadyPackets.sort(key=lambda p: p.Data.IssueTime)
-        for NodeID in range(NUM_NODES):
-            self.Inbox.Packets[NodeID].sort(key=lambda p: p.Data.IssueTime)
+        if SCHEDULING=='manaburn':
+            # sort all ready packets by the mana burned (work)
+            self.Inbox.AllReadyPackets.sort(key=lambda p: p.Data.Work)
+        else:
+            # sort inboxes by timestamp
+            self.Inbox.AllPackets.sort(key=lambda p: p.Data.IssueTime)
+            self.Inbox.AllReadyPackets.sort(key=lambda p: p.Data.IssueTime)
+            self.Inbox.AllNotReadyPackets.sort(key=lambda p: p.Data.IssueTime)
+            for NodeID in range(NUM_NODES):
+                self.Inbox.Packets[NodeID].sort(key=lambda p: p.Data.IssueTime)
         # process according to global rate Nu
         while self.Inbox.AllReadyPackets or self.Inbox.Scheduled:
             if self.Inbox.Scheduled:
@@ -154,8 +163,10 @@ class Node:
                     Packet = self.Inbox.drr_lds_schedule(nextSchedTime)
                 if SCHEDULING=='drr_ready':
                     Packet = self.Inbox.drr_ready_schedule(nextSchedTime)
-                elif SCHEDULING=='fifo':
+                if SCHEDULING=='fifo':
                     Packet = self.Inbox.fifo_schedule(nextSchedTime)
+                if SCHEDULING=='manaburn':
+                    Packet = self.Inbox.priority_schedule(nextSchedTime)
 
                 if Packet is not None:
                     self.schedule(Packet.TxNode, Packet.Data, nextSchedTime)
@@ -222,6 +233,10 @@ class Node:
                 self.enqueue(Packet)
         # broadcast the packet
         self.forward(TxNode, Msg, Time)
+
+        # burn the mana if from another node. Already burnt if from this node.
+        if Msg.NodeID != self.NodeID:
+            self.Mana[Msg.NodeID] -= Msg.Burn
 
     def forward(self, TxNode, Msg, Time):
         """

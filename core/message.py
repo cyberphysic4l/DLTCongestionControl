@@ -17,6 +17,7 @@ class Message:
         Network.ScheduledNodes[self.Index] = []
         Network.ConfirmedNodes[self.Index] = []
         self.Work = Work
+        self.Burn = 0
         self.CWeight = Work
         self.LastCWUpdate = self
         self.Dropped = False

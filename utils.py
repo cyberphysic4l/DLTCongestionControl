@@ -29,13 +29,13 @@ def plot_cdf(data, xlabel: str, dirstr: str,  xlim=0):
             if not isinstance(data[NodeID][0], int):
                 if data[NodeID][0].size>1:
                     lats = sorted(data[NodeID][0])
-            for lat in lats:
-                while i<len(bins):
-                    if lat>bins[i]:
-                        i += 1
-                    else:
-                        break
-                pdf[i-1] += 1
+                    for lat in lats:
+                        while i<len(bins):
+                            if lat>bins[i]:
+                                i += 1
+                            else:
+                                break
+                        pdf[i-1] += 1
             pdf = pdf/sum(pdf) # normalise
             cdf = np.cumsum(pdf)
             if IOT[NodeID]:
@@ -212,7 +212,7 @@ def per_node_plot(data: np.ndarray, xlabel: str, ylabel: str, title: str, dirstr
     colors = ['tab:gray', 'tab:blue', 'tab:red', 'tab:green', 'tab:olive']
     for NodeID in range(NUM_NODES):
         if MODE[NodeID] in modes and np.any(data[:, NodeID]):
-            ax.plot(np.arange((avg_window-1)*step, SIM_TIME, step), np.convolve(np.ones(avg_window)/avg_window, data[:,NodeID], 'valid'), color=colors[MODE[NodeID]])
+            ax.plot(np.arange((avg_window-1)*step, SIM_TIME, step), np.convolve(np.ones(avg_window)/avg_window, data[:,NodeID], 'valid'), color=colors[MODE[NodeID]], linewidth=5*REP[NodeID]/REP[0])
     
     ax.set_xlim(0, SIM_TIME)
     ModeLines = [Line2D([0],[0],color=colors[mode], lw=4) for mode in modes]
