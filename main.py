@@ -2,6 +2,7 @@
 """
 Created on Fri Sep 27 22:28:39 2019
 """
+from statistics import median
 import numpy as np
 import matplotlib.pyplot as plt
 from matplotlib.lines import Line2D
@@ -24,6 +25,7 @@ def main():
     Create directory for storing results with these parameters
     '''
     per_node_result_keys = ['AllReadyPackets',
+                            'AllNotReadyPackets',
                             'Dropped Messages',
                             'Number of Tips',
                             'Number of Honest Tips',
@@ -39,7 +41,9 @@ def main():
                             'Solidification Buffer Length',
                             'ReadyPackets MalNeighb',
                             'ReadyPackets NonMalNeighb',
-                            'Mana at Node 0']
+                            'Mana at Node 0',
+                            'Max Burn in Queue',
+                            'Average Burn in Queue']
     dirstr = os.path.dirname(os.path.realpath(__file__)) + '/results/'+ strftime("%Y-%m-%d_%H%M%S", gmtime())
     os.makedirs(dirstr, exist_ok=True)
     os.makedirs(dirstr+'/raw', exist_ok=True)
@@ -69,12 +73,15 @@ def simulate(per_node_result_keys, dirstr):
         per_node_results[k] = [np.zeros((TimeSteps, NUM_NODES)) for mc in range(MONTE_CARLOS)]
     MeanDelay = [np.zeros(int(TimeSteps/100)) for mc in range(MONTE_CARLOS)]
     ConfDelay = [np.zeros(int(TimeSteps/100)) for mc in range(MONTE_CARLOS)]
+    MeanBurn = [np.zeros(int(TimeSteps/100)) for mc in range(MONTE_CARLOS)]
     Unsolid = [np.zeros((TimeSteps, NUM_NODES)) for mc in range(MONTE_CARLOS)]
     EligibleDelays = [np.zeros((SIM_TIME, NUM_NODES)) for mc in range(MONTE_CARLOS)]
     latencies = [[] for NodeID in range(NUM_NODES)]
     confLatencies = [[] for NodeID in range(NUM_NODES)]
+    burns = [[] for NodeID in range(NUM_NODES)]
     latTimes = [[] for NodeID in range(NUM_NODES)]
     confLatTimes = [[] for NodeID in range(NUM_NODES)]
+    burnTimes = [[] for NodeID in range(NUM_NODES)]
     ServTimes = [[] for NodeID in range(NUM_NODES)]
     ArrTimes = [[] for NodeID in range(NUM_NODES)]
     interArrTimes = [[] for NodeID in range(NUM_NODES)]
@@ -103,13 +110,15 @@ def simulate(per_node_result_keys, dirstr):
         # output arrays
         for i in range(TimeSteps):
             if 100*i/TimeSteps%10==0:
+                print("Simulation: "+str(mc+1) +"\t " + str(int(100*i/TimeSteps))+"% Complete")
+            if len(TRAFFIC_PROFILE)*i/TimeSteps%1==0:
+                j = int(len(TRAFFIC_PROFILE)*i/TimeSteps)
                 for NodeID, Node in enumerate(Net.Nodes):
                     # change the desired rate
-                    Node.LambdaD = TRAFFIC_PROFILE[int(10*i/TimeSteps)]*NU*REP[NodeID]/sum(REP)
+                    Node.LambdaD = TRAFFIC_PROFILE[j]*NU*REP[NodeID]/sum(REP)
                     # empty the message pools so changes take immediate effect
                     Node.MsgPool.clear()
-                print("Traffic level: "+str(int(100*TRAFFIC_PROFILE[int(10*i/TimeSteps)]))+"%")
-                print("Simulation: "+str(mc+1) +"\t " + str(int(100*i/TimeSteps))+"% Complete")
+                print("Traffic level: "+str(int(100*TRAFFIC_PROFILE[j]))+"%")
             # discrete time step size specified by global variable STEP
             T = STEP*i
             """
@@ -130,6 +139,7 @@ def simulate(per_node_result_keys, dirstr):
                         OldestTxAges[i,NodeID] = T - OldestPacket.Data.IssueTime
                 per_node_results['Inbox Lengths'][mc][i,NodeID] = len(Node.Inbox.AllPackets)
                 per_node_results['AllReadyPackets'][mc][i,NodeID] = len(Node.Inbox.AllReadyPackets)
+                per_node_results['AllNotReadyPackets'][mc][i,NodeID] = len(Node.Inbox.AllNotReadyPackets)
                 per_node_results['ReadyPackets MalNeighb'][mc][i,NodeID] = len(MalNeighb.Inbox.ReadyPackets[NodeID])
                 per_node_results['ReadyPackets NonMalNeighb'][mc][i,NodeID] = len(NonMalNeighb.Inbox.ReadyPackets[NodeID])
                 per_node_results['Dropped Messages'][mc][i,NodeID] = sum([len(Node.DroppedPackets[i]) for i in range(NUM_NODES)])
@@ -149,6 +159,10 @@ def simulate(per_node_result_keys, dirstr):
                 per_node_results['Number of Unconfirmed Messages'][mc][i,NodeID] = len(Node.UnconfMsgs)
                 per_node_results['Solidification Buffer Length'][mc][i,NodeID] = len(Node.SolBuffer)
                 per_node_results['Mana at Node 0'][mc][i,NodeID] = Net.Nodes[0].Mana[NodeID]
+                if Node.Inbox.AllReadyPackets:
+                    per_node_results['Max Burn in Queue'][mc][i,NodeID] = max(Node.Inbox.AllReadyPackets, key=lambda p: p.Data.Burn).Data.Burn
+                else:
+                    per_node_results['Max Burn in Queue'][mc][i,NodeID] = 0
                 #if len(Node.SolBuffer)>100:
                     #print("Solidification issue")
                 '''if Node.UnconfMsgs:
@@ -167,6 +181,9 @@ def simulate(per_node_result_keys, dirstr):
             confDelays = [Net.ConfTimes[j]-Net.Nodes[0].Ledger[j].IssueTime for j in Net.ConfTimes if s*int(Net.ConfTimes[j]/s)==i*s]
             if confDelays:
                 ConfDelay[mc][i] = sum(confDelays)/len(confDelays)
+            burns_temp = [Net.MsgBurn[j] for j in Net.MsgBurn if s*int(Net.IssueTimes[j]/s)==i*s]
+            if burns_temp:
+                MeanBurn[mc][i] = sum(burns_temp)/len(burns_temp)
         for NodeID in range(NUM_NODES):
             for i in range(SIM_TIME):
                 delays = []
@@ -184,6 +201,7 @@ def simulate(per_node_result_keys, dirstr):
                 
         latencies, latTimes = Net.msg_latency(latencies, latTimes)
         confLatencies, confLatTimes = Net.msg_conf_latency(confLatencies, confLatTimes)
+        burns, burnTimes = Net.msg_burn(burns, burnTimes)
         
         del Net
     """
@@ -198,6 +216,7 @@ def simulate(per_node_result_keys, dirstr):
     avgLmds = sum(Lmds)/len(Lmds)
     avgMeanDelay = sum(MeanDelay)/len(MeanDelay)
     avgConfDelay = sum(ConfDelay)/len(ConfDelay)
+    avgMeanBurn = sum(MeanBurn)/len(MeanBurn)
     avgUnsolid = sum(Unsolid)/len(Unsolid)
     avgEligibleDelays = sum(EligibleDelays)/len(EligibleDelays)
     avgOTA = sum(OldestTxAge)/len(OldestTxAge)
@@ -210,6 +229,7 @@ def simulate(per_node_result_keys, dirstr):
         np.savetxt(dirstr+'/raw/' + k + '.csv', avg_per_node_results[k], delimiter=',')
     np.savetxt(dirstr+'/raw/avgMeanDelay.csv', avgMeanDelay, delimiter=',')
     np.savetxt(dirstr+'/raw/avgConfDelay.csv', avgConfDelay, delimiter=',')
+    np.savetxt(dirstr+'/raw/avgMeanBurn.csv', avgMeanBurn, delimiter=',')
     np.savetxt(dirstr+'/raw/avgOldestTxAge.csv', avgOTA, delimiter=',')
     np.savetxt(dirstr+'/raw/avgUnsolid.csv', avgUnsolid, delimiter=',')
     np.savetxt(dirstr+'/raw/avgEligibleDelays.csv', avgEligibleDelays, delimiter=',')
@@ -218,6 +238,8 @@ def simulate(per_node_result_keys, dirstr):
                    np.asarray(confLatencies[NodeID]), delimiter=',')
         np.savetxt(dirstr+'/raw/latencies'+str(NodeID)+'.csv',
                    np.asarray(latencies[NodeID]), delimiter=',')
+        np.savetxt(dirstr+'/raw/burns'+str(NodeID)+'.csv',
+                   np.asarray(burns[NodeID]), delimiter=',')
         np.savetxt(dirstr+'/raw/ServTimes'+str(NodeID)+'.csv',
                    np.asarray(ServTimes[NodeID]), delimiter=',')
         np.savetxt(dirstr+'/raw/ArrTimes'+str(NodeID)+'.csv',
@@ -245,9 +267,11 @@ def plot_results(dirstr, per_node_result_keys):
     avgEligibleDelays = np.loadtxt(dirstr+'/raw/avgEligibleDelays.csv', delimiter=',')
     avgMeanDelay = np.loadtxt(dirstr+'/raw/avgMeanDelay.csv', delimiter=',')
     avgConfDelay = np.loadtxt(dirstr+'/raw/avgConfDelay.csv', delimiter=',')
+    avgMeanBurn = np.loadtxt(dirstr+'/raw/avgMeanBurn.csv', delimiter=',')
     avgOTA = np.loadtxt(dirstr+'/raw/avgOldestTxAge.csv', delimiter=',')
     latencies = []
     confLatencies = []
+    burns = []
     ServTimes = []
     ArrTimes = []
     
@@ -262,6 +286,11 @@ def plot_results(dirstr, per_node_result_keys):
         else:
             confLat = [0]
         confLatencies.append(confLat)
+        if os.stat(dirstr+'/raw/burns'+str(NodeID)+'.csv').st_size != 0:
+            burn = [np.loadtxt(dirstr+'/raw/burns'+str(NodeID)+'.csv', delimiter=',')]
+        else:
+            burn = [0]
+        burns.append(burn)
         ServTimes.append([np.loadtxt(dirstr+'/raw/ServTimes'+str(NodeID)+'.csv', delimiter=',')])
         ArrTimes.append([np.loadtxt(dirstr+'/raw/ArrTimes'+str(NodeID)+'.csv', delimiter=',')])
     """
@@ -307,33 +336,39 @@ def plot_results(dirstr, per_node_result_keys):
     fig2.tight_layout()
     plt.savefig(dirstr+'/plots/ConfThroughput.png', bbox_inches='tight')
     
+    # Plot the traffic profile
+    
 
-    plot_cdf(latencies, 'Latency (sec)', dirstr+'/plots/Latency.png')
-    plot_cdf(confLatencies, 'Confrimation Latency (sec)', dirstr+'/plots/ConfLatency.png')
+    plot_cdf(latencies, 'Latency (sec)', dirstr+'/plots/CDFLatency.png')
+    plot_cdf(confLatencies, 'Confrimation Latency (sec)', dirstr+'/plots/CDFConfLatency.png')
+    if SCHEDULING=='manaburn':
+        plot_cdf(burns, 'Burn', dirstr+'/plots/CDFBurns.png')
 
     #per_node_plot(avgLmds, 'Time (sec)', r'$\lambda_i$', '', dirstr, avg_window=1)
     
-    for k in per_node_results:
-        per_node_plot(per_node_results[k], 'Time (sec)', k, '', dirstr, avg_window=100)
-
+    #for k in per_node_results:
+    #    per_node_plot(per_node_results[k], 'Time (sec)', k, '', dirstr, avg_window=100)
+    per_node_plot(per_node_results['Mana at Node 0'], 'Time (sec)', 'Mana at Node 0', '', dirstr, avg_window=100)
+    per_node_plot(per_node_results['Number of Tips'], 'Time (sec)', 'Number of Tips', '', dirstr, avg_window=100)
+    per_node_plot(per_node_results['AllReadyPackets'], 'Time (sec)', 'Buffer Lengths (Ready)', '', dirstr, avg_window=100)
+    per_node_plot(per_node_results['AllNotReadyPackets'], 'Time (sec)', 'Buffer Lengths (Not Ready)', '', dirstr, avg_window=100)
+    per_node_plot(per_node_results['Number of Unconfirmed Messages'], 'Time (sec)', 'Number of Unconfirmed Messages per Node', '', dirstr, avg_window=100)
+    per_node_plot(per_node_results['Max Burn in Queue'], 'Time (sec)', 'Max Burn in Queue', '', dirstr, avg_window=100)
     
     scaled_rate_plot(per_node_results['Number of Disseminated Messages'], 'Time (sec)', 'Dissemination Rate', '', dirstr)
     scaled_rate_plot(per_node_results['Number of Confirmed Messages'], 'Time (sec)', 'Confirmation Rate', '', dirstr)
     scaled_rate_plot(per_node_results['Number of Scheduled Messages'], 'Time (sec)', 'Scheduling Rate', '', dirstr)
 
-    per_node_rate_plot(per_node_results['Number of Disseminated Messages'], 'Time (sec)', 'Dissemination Rate', '', dirstr)
-    per_node_rate_plot(per_node_results['Number of Confirmed Messages'], 'Time (sec)', 'Confirmation Rate', '', dirstr)
-    per_node_rate_plot(per_node_results['Number of Scheduled Messages'], 'Time (sec)', 'Scheduling Rate', '', dirstr)
-
-    per_node_plot(avgEligibleDelays, 'Time (sec)', 'Age of Messages Becoming Eligible', '', dirstr, avg_window=20, step=1)
-    per_node_plot(avgUnsolid, 'Time (sec)', 'Unsolid', '', dirstr)
+    #per_node_plot(avgEligibleDelays, 'Time (sec)', 'Age of Messages Becoming Eligible', '', dirstr, avg_window=20, step=1)
+    #per_node_plot(avgUnsolid, 'Time (sec)', 'Unsolid', '', dirstr)
     
     per_node_barplot(REP, 'Node ID', 'Reputation', 'Reputation Distribution', dirstr+'/plots/RepDist.png')
-    per_node_barplot(QUANTUM, 'Node ID', 'Quantum', 'Quantum Distribution', dirstr+'/plots/QDist.png')
+    #per_node_barplot(QUANTUM, 'Node ID', 'Quantum', 'Quantum Distribution', dirstr+'/plots/QDist.png')
 
     all_node_plot(per_node_results['Number of Unconfirmed Messages'].sum(axis=1), 'Time (sec)', 'Number of Unconfirmed Messages', '', dirstr+'/plots/AllUnconfirmed.png')
-    all_node_plot(avgPIT, 'Time (sec)', 'Number of packets in transit', '', dirstr+'/plots/PIT.png')
-    all_node_plot(avgOTA, 'Time (sec)', 'Max time in transit (sec)', '', dirstr+'/plots/MaxAge.png')
+    #all_node_plot(avgPIT, 'Time (sec)', 'Number of packets in transit', '', dirstr+'/plots/PIT.png')
+    #all_node_plot(avgOTA, 'Time (sec)', 'Max time in transit (sec)', '', dirstr+'/plots/MaxAge.png')
+    all_node_plot(avgMeanBurn, 'Time (sec)', 'Average burn', '', dirstr+'/plots/MeanBurn.png', interval=100)
 
     """
     fig5a, ax5a = plt.subplots(figsize=(8,4))

@@ -22,8 +22,11 @@ class Network:
         self.MsgDelays = {}
         self.VisMsgDelays = {}
         self.DissemTimes = {}
+        self.IssueTimes = {}
         self.ConfTimes = {}
         self.MsgIssuer = {}
+        self.MsgBurn = {}
+        self.IssuedMsgs = {}
         Genesis = msg.Message(0, [], [], self)
         # Create nodes
         for i in range(np.size(self.A,1)):
@@ -76,6 +79,12 @@ class Network:
                 latencies[Msg.NodeID].append(self.ConfTimes[i]-Msg.IssueTime)
                 latTimes[Msg.NodeID].append(self.ConfTimes[i])
         return latencies, latTimes
+
+    def msg_burn(self, burns, burnTimes):
+        for i,Msg in self.IssuedMsgs.items():
+            burns[Msg.NodeID].append(self.MsgBurn[i])
+            burnTimes[Msg.NodeID].append(Msg.IssueTime)
+        return burns, burnTimes
 
 class CommChannel:
     """

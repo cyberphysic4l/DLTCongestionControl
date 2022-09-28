@@ -2,10 +2,10 @@ import numpy as np
 
 # Simulation Parameters
 MONTE_CARLOS = 1
-SIM_TIME = 120
+SIM_TIME = 240
 STEP = 0.001
 #TRAFFIC_PROFILE = np.random.randint(80, 110, (10,))/100.0
-TRAFFIC_PROFILE = np.array([0.5,1.5,0.5,1.5,0.5,1.5,0.5,1.5,0.5,1.5])
+TRAFFIC_PROFILE = [0.5,1.5,0.5,0.5]
 # Network Parameters
 NU = 25
 NUM_NODES = 20
@@ -16,8 +16,8 @@ REPDIST = 'zipf'
 if REPDIST=='zipf':
     # IOTA data rep distribution - Zipf s=0.9
     REP50 = [(51)/((NodeID+1)**0.9) for NodeID in range(50)]
-    REPN = [(NUM_NODES+1)/((NodeID+1)**0.9) for NodeID in range(NUM_NODES)]
-    REP = [(sum(REP50)/sum(REPN))*rep for rep in REPN]
+    REP = [(NUM_NODES+1)/((NodeID+1)**0.9) for NodeID in range(NUM_NODES)]
+    #REP = [(sum(REP50)/sum(REPN))*rep for rep in REPN]
 elif REPDIST=='uniform':
     # Permissioned System rep system?
     REP = np.ones(NUM_NODES, dtype=int)
@@ -25,8 +25,8 @@ elif REPDIST=='uniform':
 # Modes: 0 = inactive, 1 = content, 2 = best-effort, 3 = malicious
 #MODE = [3-(NodeID+1)%4 for NodeID in range(NUM_NODES)] # multiple malicious
 #MODE = [2-(NodeID)%3 for NodeID in range(NUM_NODES)] # All honest
-MODE = [1 for _ in range(NUM_NODES)] # All content
-#MODE = [2 for _ in range(NUM_NODES)] # All best effort
+#MODE = [1 for _ in range(NUM_NODES)] # All content
+MODE = [2 for _ in range(NUM_NODES)] # All best effort
 #MODE[2] = 3 # Make node 2 malicious
 IOT = np.zeros(NUM_NODES)
 IOTLOW = 0.5
@@ -48,7 +48,7 @@ SCHEDULING = 'manaburn'
 QUANTUM = [MAX_WORK*rep/sum(REP) for rep in REP]
 
 # Buffer Manager
-MAX_BUFFER = 500 # W_max
+MAX_BUFFER = 200 # W_max
 DROP_TYPE = 'tail'
 TIP_BLACKLIST = False
 
@@ -59,7 +59,7 @@ UPDATE_INTERVAL = 10
 # Tip selection
 L_MAX = None    # 'None' if no limit, otherwise max number of tips
 OWN_TXS = True  # Include own txs for tip selection
-MAX_TIP_AGE = None
+MAX_TIP_AGE = 5
 
 # Gossip optimisation
 PRUNING = False
@@ -81,5 +81,8 @@ ATK_TIP_RM_PARENTS = True
 ATK_RAND_FORWARD = False
 
 # Mana Burn
-# anxious, noburn, greedy
-BURN_POLICY = 'anxious'
+# 0 = noburn, 1 = anxious, 2 = greedy, 3 = random_greedy
+#BURN_POLICY = [2 for _ in range(NUM_NODES)]
+BURN_POLICY = np.random.randint(1, 3, size=(NUM_NODES))
+
+EXTRA_BURN = 1

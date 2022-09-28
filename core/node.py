@@ -88,10 +88,14 @@ class Node:
         while self.IssuedMsgs:
             Msg = self.IssuedMsgs.pop(0)
             if SCHEDULING=='manaburn':
-                if BURN_POLICY=='anxious':
-                    Msg.Burn = self.Mana[self.NodeID]
-                    self.Mana[self.NodeID] = 0
-                
+                Msg.Burn = self.burn_mana(Msg)
+                if Msg.Burn>self.Mana[self.NodeID]: # similar to deficit-based rate setter
+                    break
+                else:
+                    self.Mana[self.NodeID] -= Msg.Burn
+            self.Network.IssuedMsgs[Msg.Index] = Msg
+            self.Network.MsgBurn[Msg.Index] = Msg.Burn
+            self.Network.IssueTimes[Msg.Index] = Msg.IssueTime
             p = net.Packet(self, self, Msg, Msg.IssueTime)
             p.EndTime = Msg.IssueTime
             if self.NodeID==COO and Msg.IssueTime>=self.LastMilestoneTime+MILESTONE_PERIOD:
@@ -102,6 +106,23 @@ class Node:
             if MODE[self.NodeID]==3: # malicious don't consider own msgs for scheduling
                 self.schedule(self, Msg, Msg.IssueTime)
     
+    def burn_mana(self, Msg):
+        if BURN_POLICY[self.NodeID]==0: # no burn
+            burn = 0
+        if BURN_POLICY[self.NodeID]==1:  # anxious
+            burn = self.Mana[self.NodeID]
+        if BURN_POLICY[self.NodeID]==2: # greedy
+            if self.Inbox.AllReadyPackets:
+                burn = self.Inbox.AllReadyPackets[0].Data.Burn + EXTRA_BURN # highest burn message
+            else:
+                burn = 1
+        if BURN_POLICY[self.NodeID]==3: # randomised greedy
+            if self.Inbox.AllReadyPackets:
+                burn = self.Inbox.AllReadyPackets[0].Data.Burn + EXTRA_BURN*np.random.rand() # highest burn message
+            else:
+                burn = 1
+        return burn
+
     def add_tip(self, tip):
         """
         Adds tip to the tips set
@@ -390,7 +411,12 @@ class Node:
                 if sum(self.Inbox.Work)>MAX_BUFFER:
                     ScaledWork = np.array([self.Inbox.Work[NodeID]/REP[NodeID] for NodeID in range(NUM_NODES)])
                     MalNodeID = np.argmax(ScaledWork)
-                    if self.Inbox.NotReadyPackets[MalNodeID]:
+                    if SCHEDULING=='manaburn':
+                        if self.Inbox.AllNotReadyPackets:
+                            packet = self.Inbox.AllNotReadyPackets[-1]
+                        else:
+                            packet = self.Inbox.AllReadyPackets[-1]
+                    elif self.Inbox.NotReadyPackets[MalNodeID]:
                         self.Inbox.NotReadyPackets[MalNodeID].sort(key=lambda p: p.Data.IssueTime)
                         if DROP_TYPE=='head':
                             packet = self.Inbox.NotReadyPackets[MalNodeID][0] # Head drop
