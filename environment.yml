@@ -211,4 +211,4 @@ dependencies:
     - pyinstaller-hooks-contrib==2021.4
     - pyorbital==1.6.1
     - scipy==1.7.3
-prefix: /Users/ac5119/opt/anaconda3/envs/iota
+prefix: ~/opt/anaconda3/envs/iota
