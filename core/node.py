@@ -63,7 +63,7 @@ class Node:
             times = np.sort(np.random.uniform(Time, Time+STEP, np.random.poisson(STEP*self.LambdaD/Work)))
             for t in times:
                 Parents = {}
-                self.MsgPool.append(Message(t, Parents, self, self.Network, Virtual=True, Work=Work))
+                self.MsgPool.append(Message(t, Parents, self, self.Network, Work=Work))
 
         if MODE[self.NodeID]<3:
             if self.BackOff:

@@ -1,8 +1,8 @@
 import numpy as np
 
 # Simulation Parameters
-MONTE_CARLOS = 1
-SIM_TIME = 120
+MONTE_CARLOS = 20
+SIM_TIME = 60
 STEP = 0.001
 # Network Parameters
 NU = 250
@@ -63,7 +63,7 @@ PRUNING = False
 REDUNDANCY = 2
 
 # Confirmation type
-CONF_TYPE = 'Coo'
+CONF_TYPE = 'CW'
 ## Coordinator (Coo)
 MILESTONE_PERIOD = 10
 COO = 0

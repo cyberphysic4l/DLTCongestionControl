@@ -190,49 +190,61 @@ def plot_ratesetter_comp(dir1, dir2, dir3):
     axt = ax.twinx()  
     ax.tick_params(axis='y', labelcolor='black')
     axt.tick_params(axis='y', labelcolor='tab:gray')
-    ax.set_ylabel(r'$DR/\nu \quad (\%)$', color='black')
-    axt.set_ylabel('Mean Latency (sec)', color='tab:gray')
+    ax.set_ylabel('Confirmation Rate (blocks/sec)', color='black')
+    axt.set_ylabel('Confirmation Latency (sec)', color='tab:gray')
     
-    avgTP1 = np.loadtxt(dir1+'/avgTP.csv', delimiter=',')
-    avgMeanDelay1 = np.loadtxt(dir1+'/avgMeanDelay.csv', delimiter=',')
-    avgTP2 = np.loadtxt(dir2+'/avgTP.csv', delimiter=',')
-    avgMeanDelay2 = np.loadtxt(dir2+'/avgMeanDelay.csv', delimiter=',')
-    avgTP3 = np.loadtxt(dir3+'/avgTP.csv', delimiter=',')
-    avgMeanDelay3 = np.loadtxt(dir3+'/avgMeanDelay.csv', delimiter=',')
+    avg_window=1000
+    data = np.loadtxt(dir1+'/raw/Number of Confirmed Messages.csv', delimiter=',')
+    avgTP1 = np.concatenate((np.zeros((avg_window, 20)),(data[avg_window:,:]-data[:-avg_window,:])))/(avg_window*STEP)
+    avgMeanDelay1 = np.loadtxt(dir1+'/raw/avgConfDelay.csv', delimiter=',')
+    avgOUA1 = np.loadtxt(dir1+'/raw/avgOldestUnconfAge.csv', delimiter=',')
+    data = np.loadtxt(dir2+'/raw/Number of Confirmed Messages.csv', delimiter=',')
+    avgTP2 = np.concatenate((np.zeros((avg_window, 40)),(data[avg_window:,:]-data[:-avg_window,:])))/(avg_window*STEP)
+    avgMeanDelay2 = np.loadtxt(dir2+'/raw/avgConfDelay.csv', delimiter=',')
+    avgOUA2 = np.loadtxt(dir2+'/raw/avgOldestUnconfAge.csv', delimiter=',')
+    data = np.loadtxt(dir3+'/raw/Number of Confirmed Messages.csv', delimiter=',')
+    avgTP3 = np.concatenate((np.zeros((avg_window, 60)),(data[avg_window:,:]-data[:-avg_window,:])))/(avg_window*STEP)
+    avgMeanDelay3 = np.loadtxt(dir3+'/raw/avgConfDelay.csv', delimiter=',')
+    avgOUA3 = np.loadtxt(dir3+'/raw/avgOldestUnconfAge.csv', delimiter=',')
     
-    markerevery = 500
-    ax.plot(np.arange(10, SIM_TIME, STEP), 100*np.sum(avgTP1[1000:,:]/NU, axis=1), color = 'black', marker = 'o', markevery=markerevery)
-    axt.plot(np.arange(0, SIM_TIME, 1), avgMeanDelay1, color='tab:gray', marker = 'o', markevery=int(markerevery*STEP)) 
-    ax.plot(np.arange(10, SIM_TIME, STEP), 100*np.sum(avgTP2[1000:,:]/NU, axis=1), color = 'black', marker = 'x', markevery=markerevery)
-    axt.plot(np.arange(0, SIM_TIME, 1), avgMeanDelay2, color='tab:gray', marker = 'x', markevery=int(markerevery*STEP))  
-    ax.plot(np.arange(10, SIM_TIME, STEP), 100*np.sum(avgTP3[1000:,:]/NU, axis=1), color = 'black', marker = '^', markevery=markerevery)
-    axt.plot(np.arange(0, SIM_TIME, 1), avgMeanDelay3, color='tab:gray', marker = '^', markevery=int(markerevery*STEP))  
-    ax.set_ylim([0,110])
-    axt.set_ylim([0,9])
+    markerevery = 2000
+    ax.plot(np.arange(avg_window*STEP, SIM_TIME, STEP), np.sum(avgTP1[avg_window:,:], axis=1), color = 'black', marker = 'o', markevery=markerevery)
+    axt.plot(np.arange(0, SIM_TIME, 100*STEP), avgMeanDelay1, color='tab:gray', marker = 'o', markevery=int(markerevery/100)) 
+    ax.plot(np.arange(avg_window*STEP, SIM_TIME, STEP), np.sum(avgTP2[avg_window:,:], axis=1), color = 'black', marker = 'x', markevery=markerevery)
+    axt.plot(np.arange(0, SIM_TIME, 100*STEP), avgMeanDelay2, color='tab:gray', marker = 'x', markevery=int(markerevery/100))  
+    ax.plot(np.arange(avg_window*STEP, SIM_TIME, STEP), np.sum(avgTP3[avg_window:,:], axis=1), color = 'black', marker = '^', markevery=markerevery)
+    axt.plot(np.arange(0, SIM_TIME, 100*STEP), avgMeanDelay3, color='tab:gray', marker = '^', markevery=int(markerevery/100))  
+    ax.set_ylim([0,350])
+    axt.set_ylim([0,18])
+    ax.axhline(NU, xmax=SIM_TIME, color='tab:red', linestyle='--')
     
-    ModeLines = [Line2D([0],[0],color='black', linestyle=None, marker='o'), Line2D([0],[0],color='black', linestyle=None, marker='x'), Line2D([0],[0],color='black', linestyle=None, marker='^')]
-    #ax.legend(ModeLines, [r'$A=0.05$', r'$A=0.075$', r'$A=0.1$'], loc='lower right')
-    #ax.set_title(r'$\beta=0.7, \quad W=2$')
-    #ax.legend(ModeLines, [r'$\beta=0.5$', r'$\beta=0.7$', r'$\beta=0.9$'], loc='lower right')
-    #ax.set_title(r'$A=0.075, \quad W=2$')
-    ax.legend(ModeLines, [r'$W=1$', r'$W=2$', r'$W=3$'], loc='lower right')
-    ax.set_title(r'$A=0.075, \quad \beta=0.7$')
-    #ax.legend(ModeLines, ['Our algorithm', 'PoW case 1', 'PoW case 2'], loc='right')
-    #ax.set_title('Our algorithm vs. PoW')
-    #ax.legend(ModeLines, [r'$|\mathcal{M}|=25$', r'$|\mathcal{M}|=50$', r'$|\mathcal{M}|=75$'], loc='lower right', ncol=1)
-    #ax.set_title(r'$A=0.075, \quad \beta=0.7, \quad W=2$')
-    #ax.legend(ModeLines, ['PoW case 1', 'PoW case 2', 'PoW case 3'], loc='right')
+    ModeLines1 = [Line2D([0],[0],color='black', linestyle='None', marker='o'), Line2D([0],[0],color='black', linestyle='None', marker='x'), Line2D([0],[0],color='black', linestyle='None', marker='^')]
+    ModeLines2 = [Line2D([0],[0],color='black'), Line2D([0],[0],color='tab:red', linestyle='--'), Line2D([0],[0],color='tab:gray')]
+    
+    ax.legend(ModeLines1, [r'$|\mathcal{M}|=20$', r'$|\mathcal{M}|=40$', r'$|\mathcal{M}|=60$'], loc='lower center', ncol=1)
+    axt.legend(ModeLines2, ['Confirmation Rate', 'Scheduling Rate', 'Confirmation Latency'], loc='lower right', ncol=1)
     
     dirstr = os.path.dirname(os.path.realpath(__file__)) + '/results/'+ strftime("%Y-%m-%d_%H%M%S", gmtime())
     os.makedirs(dirstr, exist_ok=True)
     
-    copyfile(dir1+'/aaconfig.txt', dirstr+'/config1.txt')
-    copyfile(dir2+'/aaconfig.txt', dirstr+'/config2.txt')
-    copyfile(dir3+'/aaconfig.txt', dirstr+'/config3.txt')
+    copyfile(dir1+'/global_params.txt', dirstr+'/config1.txt')
+    copyfile(dir2+'/global_params.txt', dirstr+'/config2.txt')
+    copyfile(dir3+'/global_params.txt', dirstr+'/config3.txt')
     
     fig.tight_layout()
     plt.savefig(dirstr+'/Throughput.png', bbox_inches='tight')
-    
+
+    fig, ax = plt.subplots(figsize=(8,4))
+    ax.grid(linestyle='--')
+    ax.set_xlabel('Time (sec)')
+    ax.set_ylabel('Max time partially confirmed (sec)')
+    ax.plot(np.arange((avg_window-1)*STEP, SIM_TIME, STEP), np.convolve(np.ones(avg_window)/avg_window, avgOUA1, 'valid'), color = 'black', marker = 'o', markevery=markerevery)
+    ax.plot(np.arange((avg_window-1)*STEP, SIM_TIME, STEP), np.convolve(np.ones(avg_window)/avg_window, avgOUA2, 'valid'), color = 'black', marker = 'x', markevery=markerevery)
+    ax.plot(np.arange((avg_window-1)*STEP, SIM_TIME, STEP), np.convolve(np.ones(avg_window)/avg_window, avgOUA3, 'valid'), color = 'black', marker = '^', markevery=markerevery)
+    ax.legend(ModeLines1, [r'$|\mathcal{M}|=20$', r'$|\mathcal{M}|=40$', r'$|\mathcal{M}|=60$'], loc='lower right', ncol=1)
+
+    fig.tight_layout()
+    plt.savefig(dirstr+'/OUA.png', bbox_inches='tight')
 
 def plot_scheduler_comp(dir1, dir2):
     
@@ -274,7 +286,7 @@ def per_node_barplot(data, xlabel: str, ylabel: str, title: str, dirstr: str, le
     ax.set_xlabel(xlabel)
     ax.title.set_text(title)
     ax.set_ylabel(ylabel)
-    ax.set_xticks([0,5,10,15])
+    #ax.set_xticks([0,5,10,15])
     if modes is None:
         modes = list(set(MODE))
     mode_names = ['Inactive', 'Content','Best-effort', 'Malicious', 'Multi-rate']
@@ -335,14 +347,14 @@ def per_node_plot_mean(data: np.ndarray, xlabel: str, ylabel: str, title: str, d
     plt.figtext(0.5, 0.01, figtxt, wrap=True, horizontalalignment='center', fontsize=12)
     plt.savefig(dirstr+'/plots/'+ylabel+'.png', bbox_inches='tight')
 
-def scaled_rate_plot(data: np.ndarray, xlabel: str, ylabel: str, title: str, dirstr: str, avg_window: int = 1000, legend_loc: str = 'right', modes = None, step=STEP, figtxt = ''):
+def scaled_rate_plot(data: np.ndarray, xlabel: str, ylabel1: str, ylabel2: str, title: str, dirstr: str, avg_window: int = 1000, legend_loc: str = 'right', modes = None, step=STEP, figtxt = ''):
     
     fig, ax = plt.subplots(2,1, sharex=True, figsize=(8,8))
     ax[0].grid(linestyle='--')
     ax[1].grid(linestyle='--')
     ax[1].set_xlabel(xlabel)
-    ax[0].set_ylabel(ylabel)
-    ax[1].set_ylabel('Scaled '+ylabel)
+    ax[0].set_ylabel(ylabel1)
+    ax[1].set_ylabel(ylabel2)
 
     if modes is None:
         modes = list(set(MODE))
@@ -355,12 +367,12 @@ def scaled_rate_plot(data: np.ndarray, xlabel: str, ylabel: str, title: str, dir
     
     ax[0].set_xlim(0, SIM_TIME)
     ax[1].set_xlim(0, SIM_TIME)
-    ModeLines = [Line2D([0],[0],color=colors[mode], lw=4) for mode in modes]
+    ModeLines = [Line2D([0],[0],color=colors[mode], lw=4) for mode in modes if mode!=0]
     if len(modes)>1:
-        fig.legend(ModeLines, [mode_names[i] for i in modes], loc=legend_loc)
+        fig.legend(ModeLines, [mode_names[mode] for mode in modes if mode!=0], loc=legend_loc)
 
     plt.figtext(0.5, 0.01, figtxt, wrap=True, horizontalalignment='center', fontsize=12)
-    plt.savefig(dirstr+'/plots/Scaled '+ylabel+'.png', bbox_inches='tight')
+    plt.savefig(dirstr+'/plots/Scaled '+title+'.png', bbox_inches='tight')
 
 def per_node_rate_plot(data: np.ndarray, xlabel: str, ylabel: str, title: str, dirstr: str, avg_window: int = 1000, legend_loc: str = 'upper right', modes = None, step=STEP, figtxt = ''):
     fig, ax = plt.subplots(figsize=(8,4))
@@ -409,10 +421,10 @@ def per_node_plotly_plot(time, data: np.ndarray, xlabel: str, ylabel: str, title
 
     return fig
 
-def all_node_plot(data: np.ndarray, xlabel: str, ylabel: str, title: str, dirstr: str):
+def all_node_plot(data: np.ndarray, xlabel: str, ylabel: str, title: str, dirstr: str, avg_window=1):
     _, ax = plt.subplots(figsize=(8,4))
     ax.grid(linestyle='--')
-    ax.plot(np.arange(0, SIM_TIME, STEP), data, color='black')
+    ax.plot(np.arange((avg_window-1)*STEP, SIM_TIME, STEP), np.convolve(np.ones(avg_window)/avg_window, data, 'valid'), color='black')
     ax.set_ylabel(ylabel)
     ax.set_xlabel(xlabel)
     plt.savefig(dirstr, bbox_inches='tight')
