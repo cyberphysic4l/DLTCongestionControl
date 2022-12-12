@@ -8,139 +8,35 @@ from matplotlib.lines import Line2D
 import networkx as nx
 import os
 import shutil
-import sys
 from time import gmtime, strftime
 from core.global_params import *
-from core.network import Network, Packet
-from utils import all_node_plot, per_node_barplot, per_node_plot, per_node_plot_mean, per_node_plotly_plot, plot_cdf, plot_cdf_exp, plot_ratesetter_comp, per_node_rate_plot, scaled_rate_plot
-import plotly.express as px
-import plotly.graph_objects as go
-import dash
-import dash_core_components as dcc
-import dash_html_components as html
-from dash.dependencies import Input, Output, State
-import webbrowser
-
-TimeSteps = int(SIM_TIME/STEP)
-n_steps = UPDATE_INTERVAL*int(1/STEP)
-InboxLens = np.zeros((int(SIM_TIME/STEP), NUM_NODES))
-TipsSet = np.zeros((int(SIM_TIME/STEP), NUM_NODES))
-HonTipsSet = np.zeros((int(SIM_TIME/STEP), NUM_NODES))
-Throughput = np.zeros((int((SIM_TIME+UPDATE_INTERVAL)/STEP), NUM_NODES))
-RepThroughput = np.zeros((int((SIM_TIME+UPDATE_INTERVAL)/STEP), NUM_NODES))
-DissemRate = np.zeros((int(SIM_TIME/STEP), NUM_NODES))
-fig = per_node_plotly_plot(0, InboxLens, 'Time', 'Inbox Length', 'Inbox Length Plot', avg_window=100)
-if GRAPH=='regular':
-    G = nx.random_regular_graph(NUM_NEIGHBOURS, NUM_NODES) # random regular graph
-elif GRAPH=='complete':
-    G = nx.complete_graph(NUM_NODES) # complete graph
-elif GRAPH=='cycle':
-    G = nx.cycle_graph(NUM_NODES) # cycle graph
-#G = nx.read_adjlist('input_adjlist.txt', delimiter=' ')
-# Get adjacency matrix and weight by delay at each channel
-ChannelDelays = 0.05*np.ones((NUM_NODES, NUM_NODES))+0.1*np.random.rand(NUM_NODES, NUM_NODES)
-AdjMatrix = np.multiply(1*np.asarray(nx.to_numpy_matrix(G)), ChannelDelays)
-Net = Network(AdjMatrix)
-T = 0
-
-app = dash.Dash(__name__)
-
-app.layout = html.Div([
-    dcc.Tabs(id="tabs-graph", value='dissem-graph', children=[
-        dcc.Tab(label='Dissemination Rate', value='dissem-graph'),
-        dcc.Tab(label='Reputation-scaled Dissemination Rate', value='rep-dissem-graph'),
-        dcc.Tab(label='Inbox Lengths', value='inbox-graph'),
-        dcc.Tab(label='Number of Tips', value='tips-graph'),
-        dcc.Tab(label='Number of Honest Tips', value='hontips-graph')
-    ]),
-    html.Button('Start/Stop', id='startstop', n_clicks=0),
-    dcc.Graph(id='output-state', figure=fig),
-    html.Div(id='updates', children=0),
-    html.H2("Set Desired Issue Rates"),
-    html.Div([
-        html.Div([
-            "Node " + str(NodeID+1) + "\t",
-            dcc.Input(id='range' + str(NodeID), type='number', min=0, max=200, step=0.1, value=int(1000*Net.Nodes[NodeID].LambdaD/NU)/10.0)
-        ]) for NodeID in range(NUM_NODES)]+
-        [html.Div(id = 'lambdad', children = 'Total desired Lambda = ' + str(100*sum([Node.LambdaD for Node in Net.Nodes])/NU) + '%')]
-    )
-])    
-
-@app.callback(Output('output-state', 'figure'),
-              Output('updates', 'children'),
-              Output('lambdad', 'children'),
-              Input('updates', 'children'),
-              State('tabs-graph', 'value'),
-              [State('range' + str(NodeID), 'value') for NodeID in range(NUM_NODES)])
-def update_line_chart(*args):
-    # discrete time step size specified by global variable STEP
-    global T, DissemRate, InboxLens, TipsSet, HonTipsSet, Throughput, RepThroughput
-    n_updates = args[0]
-    tab = args[1]
-    n_updates_out = n_updates + 1
-    InboxLens[:-n_steps] = InboxLens[n_steps:]
-    TipsSet[:-n_steps] = TipsSet[n_steps:]
-    HonTipsSet[:-n_steps] = HonTipsSet[n_steps:]
-    Throughput[:-n_steps] = Throughput[n_steps:]
-    RepThroughput[:-n_steps] = RepThroughput[n_steps:]
-    for i in range(n_steps):
-        T = T + STEP
-        Net.simulate(T)
-        for NodeID in range(NUM_NODES):
-            if args[NodeID+2] is not None:
-                if 100*Net.Nodes[NodeID].LambdaD/NU != args[NodeID+2]:
-                    Net.Nodes[NodeID].LambdaD = NU*args[NodeID+2]/100
-                    Net.Nodes[NodeID].MsgPool = []
-            Throughput[TimeSteps+i, NodeID] = Net.Disseminated[NodeID]
-            RepThroughput[TimeSteps+i, NodeID] = Net.Disseminated[NodeID]*sum(REP)/REP[NodeID]
-            InboxLens[TimeSteps-n_steps+i,NodeID] = len(Net.Nodes[NodeID].Inbox.AllPackets)
-            TipsSet[TimeSteps-n_steps+i,NodeID] = len(Net.Nodes[NodeID].TipsSet)
-            HonTipsSet[TimeSteps-n_steps+i,NodeID] = sum([len(Net.Nodes[NodeID].NodeTipsSet[i]) for i in range(NUM_NODES) if MODE[i]<3])
-    DissemRate = (Throughput[n_steps:]-Throughput[:-n_steps])/NU*UPDATE_INTERVAL
-    RepDissemRate = (RepThroughput[n_steps:]-RepThroughput[:-n_steps])/NU*UPDATE_INTERVAL
-    if tab == 'inbox-graph':
-        fig_out = per_node_plotly_plot(T, InboxLens, 'Time', 'Inbox Length', 'Inbox Length Plot', avg_window=100)
-    elif tab == 'tips-graph':
-        fig_out = per_node_plotly_plot(T, TipsSet, 'Time', 'Number of Tips', 'Tip Set Plot', avg_window=100)
-    elif tab == 'hontips-graph':
-        fig_out = per_node_plotly_plot(T, TipsSet, 'Time', 'Number of Honest Tips', 'Tip Set Plot', avg_window=100)
-    elif tab == 'dissem-graph':
-        fig_out = per_node_plotly_plot(T, DissemRate, 'Time', 'Rate (%)', 'Dissemination Rate Plot', avg_window=100)
-    elif tab == 'rep-dissem-graph':
-        fig_out = per_node_plotly_plot(T, RepDissemRate, 'Time', 'Rate', 'Repuatation-scaled Dissemination Rate (moving average)', avg_window=10000)
-    lambdad = 'Total desired Lambda = ' + str(100*sum([Node.LambdaD for Node in Net.Nodes])/NU) + '%'
-
-    return fig_out, n_updates_out, lambdad
+from core.network import Network
+from utils import all_node_plot, per_node_barplot, per_node_plot, per_node_plot_mean, plot_cdf, per_node_rate_plot, scaled_rate_plot
     
 def main():
     '''
     Create directory for storing results with these parameters
     '''
-    if DASH:
-        webbrowser.open('http://127.0.0.1:8050/')
-        app.run_server(debug=False)
-    else:
-        per_node_result_keys = ['AllReadyPackets',
-                                'Dropped Messages',
-                                'Number of Tips',
-                                'Number of Honest Tips',
-                                'Inbox Lengths',
-                                'Inbox Lengths (moving average)',
-                                'Number of Disseminated Messages',
-                                'Number of Undisseminated Messages',
-                                'Number of Confirmed Messages',
-                                'Number of Unconfirmed Messages',
-                                'Number of Scheduled Messages']
-        dirstr1 = os.path.dirname(os.path.realpath(__file__)) 
-        dirstr = dirstr1 + '/results/'+ strftime("%Y-%m-%d_%H%M%S", gmtime())
-        os.makedirs(dirstr, exist_ok=True)
-        os.makedirs(dirstr+'/raw', exist_ok=True)
-        os.makedirs(dirstr+'/plots', exist_ok=True)
-        shutil.copy("core/global_params.py", dirstr+"/global_params.txt")
-        #per_node_result_keys = simulate(per_node_result_keys, dirstr)
-        dirstr = os.path.dirname(os.path.realpath(__file__)) + '/results/20Nodes'
-        plot_results(dirstr, per_node_result_keys)
-        #plot_ratesetter_comp(dirstr1+'/results/20Nodes', dirstr1+'/results/40Nodes', dirstr1+'/results/60Nodes')
+    per_node_result_keys = ['AllReadyPackets',
+                            'Dropped Messages',
+                            'Number of Tips',
+                            'Number of Honest Tips',
+                            'Inbox Lengths',
+                            'Inbox Lengths (moving average)',
+                            'Deficits',
+                            'Number of Disseminated Messages',
+                            'Number of Undisseminated Messages',
+                            'Number of Confirmed Messages',
+                            'Number of Unconfirmed Messages',
+                            'Number of Scheduled Messages']
+    dirstr1 = os.path.dirname(os.path.realpath(__file__)) 
+    dirstr = dirstr1 + '/results/'+ strftime("%Y-%m-%d_%H%M%S", gmtime())
+    os.makedirs(dirstr, exist_ok=True)
+    os.makedirs(dirstr+'/raw', exist_ok=True)
+    os.makedirs(dirstr+'/plots', exist_ok=True)
+    shutil.copy("core/global_params.py", dirstr+"/global_params.txt")
+    per_node_result_keys = simulate(per_node_result_keys, dirstr)
+    plot_results(dirstr, per_node_result_keys)
     
 def simulate(per_node_result_keys, dirstr):
     """
@@ -216,35 +112,21 @@ def simulate(per_node_result_keys, dirstr):
             PacketsInTransit[mc][i] = sum([sum([len(cc.Packets) for cc in ccs]) for ccs in Net.CommChannels])
             for NodeID, Node in enumerate(Net.Nodes):
                 Lmds[mc][i, NodeID] = min(Node.Lambda, Node.LambdaD)
-                """
-                if Node.Inbox.AllPackets and MODE[NodeID]<3: #don't include malicious nodes
-                    HonestPackets = [p for p in Node.Inbox.AllPackets if MODE[p.Data.NodeID]<3]
-                    if HonestPackets:
-                        OldestPacket = min(HonestPackets, key=lambda x: x.Data.IssueTime)
-                        OldestTxAges[i,NodeID] = T - OldestPacket.Data.IssueTime
-                """
+                
                 per_node_results['Inbox Lengths'][mc][i,NodeID] = len(Node.Inbox.AllPackets)
                 per_node_results['AllReadyPackets'][mc][i,NodeID] = len(Node.Inbox.AllReadyPackets)
-                per_node_results['ReadyPackets MalNeighb'][mc][i,NodeID] = len(MalNeighb.Inbox.ReadyPackets[NodeID])
-                per_node_results['ReadyPackets NonMalNeighb'][mc][i,NodeID] = len(NonMalNeighb.Inbox.ReadyPackets[NodeID])
                 per_node_results['Dropped Messages'][mc][i,NodeID] = sum([len(Node.DroppedPackets[i]) for i in range(NUM_NODES)])
                 if sum([len(n.DroppedPackets[NodeID]) for n in Net.Nodes]):
                     Droppees[NodeID] = sum([len(n.DroppedPackets[NodeID]) for n in Net.Nodes])
                 per_node_results['Number of Tips'][mc][i,NodeID] = len(Node.TipsSet)
                 per_node_results['Number of Honest Tips'][mc][i,NodeID] = sum([len(Node.NodeTipsSet[i]) for i in range(NUM_NODES) if MODE[i]<3])
-                #This measurement takes ages so left out unless needed.
-                #Unsolid[mc][i,NodeID] = len([msg for _,msg in Net.Nodes[NodeID].Ledger.items() if not msg.Solid])
                 per_node_results['Inbox Lengths (moving average)'][mc][i,NodeID] = Node.Inbox.Avg
                 per_node_results['Deficits'][mc][i, NodeID] = Net.Nodes[0].Inbox.Deficit[NodeID]
                 per_node_results['Number of Disseminated Messages'][mc][i, NodeID] = Net.Disseminated[NodeID]
                 per_node_results['Number of Scheduled Messages'][mc][i, NodeID] = Net.Scheduled[NodeID]
-                #per_node_results['Work Disseminated'][mc][i,NodeID] = Net.WorkDisseminated[NodeID]
                 per_node_results['Number of Undisseminated Messages'][mc][i,NodeID] = Node.Undissem
                 per_node_results['Number of Confirmed Messages'][mc][i,NodeID] = len(Node.ConfMsgs)
                 per_node_results['Number of Unconfirmed Messages'][mc][i,NodeID] = len(Node.UnconfMsgs)
-                per_node_results['Solidification Buffer Length'][mc][i,NodeID] = len(Node.SolBuffer)
-                #if len(Node.SolBuffer)>100:
-                    #print("Solidification issue")
         print("Simulation: "+str(mc+1) +"\t 100% Complete")
         
         OldestTxAge.append(np.mean(OldestTxAges, axis=1))

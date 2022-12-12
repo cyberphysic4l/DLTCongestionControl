@@ -1,7 +1,7 @@
 import numpy as np
 
 # Simulation Parameters
-MONTE_CARLOS = 20
+MONTE_CARLOS = 1
 SIM_TIME = 60
 STEP = 0.001
 # Network Parameters
@@ -24,7 +24,7 @@ elif REPDIST=='uniform':
 #MODE = [3-(NodeID+1)%4 for NodeID in range(NUM_NODES)] # multiple malicious
 MODE = [2-(NodeID)%3 for NodeID in range(NUM_NODES)] # All honest
 #MODE = [1 for _ in range(NUM_NODES)] # All content (95%)
-MODE[2] = 3 # Make node 2 malicious
+#MODE[2] = 3 # Make node 2 malicious
 IOT = np.zeros(NUM_NODES)
 IOTLOW = 0.5
 IOTHIGH = 1
@@ -48,10 +48,6 @@ QUANTUM = [MAX_WORK*rep/sum(REP) for rep in REP]
 MAX_BUFFER = 500 # W_max
 DROP_TYPE = 'tail'
 TIP_BLACKLIST = False
-
-# Dash visualisation
-DASH = False
-UPDATE_INTERVAL = 10
 
 # Tip selection
 L_MAX = None    # 'None' if no limit, otherwise max number of tips
