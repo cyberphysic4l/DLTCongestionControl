@@ -3,7 +3,7 @@ Python simulator for the IOTA Access/Congestion Control Algorithm (ICCA).
 
 # Installation
 Install Conda 4.10.3 or greater.
-If you are using a Mac, you can create the environment from the provided yaml file.
+If you are using a Mac, you can create the environment from the provided yaml file. Just change the "prefix" on the last line of environment.yml and then:
 ```console
 ~$ conda env create -f environment.yml
 ~$ conda activate iota
